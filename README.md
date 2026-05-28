@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-基于 [youngyangyang04/JChatMind](https://github.com/youngyangyang04/JChatMind) 的学习与实践 Fork，欢迎贡献。
+AI 智能体助手，基于 Spring AI 构建，实现自主决策、工具调用和 RAG 知识库检索。
 
 ## 技术栈
 
