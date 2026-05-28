@@ -130,20 +130,19 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
             {menuItems.map((item) => {
               const isSelected = selectedKey === item.key;
               return (
-                <React.Fragment key={item.key}>
-                  <div
-                    onClick={() => setSelectedKey(item.key)}
-                    className={`px-3 py-2 rounded-lg hover:bg-gray-100 ${isSelected ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600"}`}
-                  >
-                    {item.label}
-                  </div>
-                </React.Fragment>
+                <div
+                  key={item.key}
+                  onClick={() => setSelectedKey(item.key)}
+                  className={`px-3 py-2 rounded-lg hover:bg-gray-100 ${isSelected ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600"}`}
+                >
+                  {item.label}
+                </div>
               );
             })}
           </div>
         </div>
-        <div className="flex-1 h-full relative">
-          <div className="px-4 pb-4 overflow-y-scroll">
+        <div className="flex-1 h-full flex flex-col min-h-0">
+          <div className="flex-1 px-4 overflow-y-auto min-h-0">
             {selectedKey === "base" && (
               <div>
                 <div className="mb-3">
@@ -491,12 +490,14 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
               </div>
             )}
           </div>
-          <div className="absolute bottom-0 right-0">
+          <div className="flex justify-end px-4 py-3 border-t border-gray-100">
             <Button
               type="primary"
               icon={<SaveOutlined />}
               loading={createAgentLoading}
+              disabled={!formData.name.trim()}
               onClick={async () => {
+                if (!formData.name.trim()) return;
                 setCreateAgentLoading(true);
                 try {
                   if (isEditMode && editingAgent && updateAgentHandle) {

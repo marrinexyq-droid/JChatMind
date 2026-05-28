@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { message as antdMessage } from "antd";
 import AgentChatHistory from "./agentChatView/AgentChatHistory.tsx";
 import AgentChatInput from "./agentChatView/AgentChatInput.tsx";
@@ -9,6 +9,7 @@ import {
   getChatMessagesBySessionId,
   getChatSession,
 } from "../../api/api.ts";
+import { BASE_URL } from "../../api/http.ts";
 import { useAgents } from "../../hooks/useAgents.ts";
 import { useChatSessions } from "../../hooks/useChatSessions.ts";
 import EmptyAgentChatView from "./agentChatView/EmptyAgentChatView.tsx";
@@ -17,7 +18,6 @@ import type { ChatMessageVO, SseMessage, SseMessageType } from "../../types";
 const AgentChatView: React.FC = () => {
   const { chatSessionId } = useParams<{ chatSessionId: string }>();
   const navigate = useNavigate();
-  const { state } = useLocation();
   const [loading, setLoading] = useState(false);
   const { agents } = useAgents();
   const { refreshChatSessions } = useChatSessions();
@@ -52,11 +52,7 @@ const AgentChatView: React.FC = () => {
     getChatMessages().then();
   }, [chatSessionId, getChatMessages]);
 
-  const handleSendMessage = async (value: string | { text: string }) => {
-    // 处理 Sender 组件可能传递的不同格式
-    const message = typeof value === "string" ? value : value.text;
-
-    console.log(message);
+  const handleSendMessage = async (message: string) => {
 
     if (!message || !message.trim()) return;
 
@@ -72,16 +68,18 @@ const AgentChatView: React.FC = () => {
           agentId: agentId,
           title: message.slice(0, 20),
         });
+        // 创建会话后立即发送首条消息
+        await createChatMessage({
+          agentId: agentId,
+          sessionId: response.chatSessionId,
+          role: "user",
+          content: message,
+        });
         // 刷新聊天会话列表
         await refreshChatSessions();
         // 导航到新创建的会话
         navigate(`/chat/${response.chatSessionId}`, {
           replace: true,
-          // 携带初始化消息
-          state: {
-            init: false,
-            initMessage: message,
-          },
         });
       } catch (error) {
         console.error("创建聊天会话失败:", error);
@@ -90,23 +88,13 @@ const AgentChatView: React.FC = () => {
         setLoading(false);
       }
     } else {
-      if (state?.init) {
-        console.log("init", state.initMessage);
-        await createChatMessage({
-          agentId: agentId ?? "",
-          sessionId: chatSessionId,
-          role: "user",
-          content: state.initMessage ?? "",
-        });
-      } else {
-        console.log("ask", message);
-        await createChatMessage({
-          agentId: agentId ?? "",
-          sessionId: chatSessionId,
-          role: "user",
-          content: message,
-        });
-      }
+      console.log("ask", message);
+      await createChatMessage({
+        agentId: agentId ?? "",
+        sessionId: chatSessionId,
+        role: "user",
+        content: message,
+      });
       await getChatMessages();
     }
   };
@@ -122,12 +110,9 @@ const AgentChatView: React.FC = () => {
     if (!chatSessionId) {
       return;
     }
-    const es = new EventSource(
-      `http://localhost:8080/sse/connect/${chatSessionId}`,
-    );
-    es.onmessage = (event) => {
-      console.log("Received message:", event.data);
-    };
+    // SSE 端点不在 /api 路径下，从 BASE_URL 推导根地址
+    const baseRoot = BASE_URL.replace("/api", "");
+    const es = new EventSource(`${baseRoot}/sse/connect/${chatSessionId}`);
     es.onerror = (error) => {
       console.error("SSE error:", error);
     };
@@ -175,7 +160,6 @@ const AgentChatView: React.FC = () => {
       <EmptyAgentChatView
         agents={agents}
         loading={loading}
-        handleSendMessage={handleSendMessage}
       />
     );
   }

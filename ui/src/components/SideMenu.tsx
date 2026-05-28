@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { RobotOutlined } from "@ant-design/icons";
 import { Tabs, type TabsProps } from "antd";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import AgentTabContent from "./tabs/AgentTabContent.tsx";
 import AddAgentModal from "./modals/AddAgentModal.tsx";
 import ChatTabContent from "./tabs/ChatTabContent.tsx";
@@ -10,12 +10,9 @@ import AddKnowledgeBaseModal from "./modals/AddKnowledgeBaseModal.tsx";
 import { useAgents } from "../hooks/useAgents.ts";
 import { useKnowledgeBases } from "../hooks/useKnowledgeBases.ts";
 
-interface SideMenuProps {
-  children?: React.ReactNode;
-}
-
-const SideMenu: React.FC<SideMenuProps> = () => {
+const SideMenu: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
   const toggleAddAgentModal = () => {
@@ -47,9 +44,31 @@ const SideMenu: React.FC<SideMenuProps> = () => {
 
   const { knowledgeBases, createKnowledgeBaseHandle } = useKnowledgeBases();
 
+  // URL 变化时同步 activeKey
+  useEffect(() => {
+    if (location.pathname.startsWith("/agent")) {
+      setActiveKey("agent");
+    } else if (location.pathname.startsWith("/knowledge-base")) {
+      setActiveKey("knowledgeBase");
+    } else if (location.pathname.startsWith("/chat")) {
+      setActiveKey("chat");
+    }
+  }, [location.pathname]);
+
   // 处理标签页切换
   const handleTabChange = (key: string) => {
     setActiveKey(key);
+    switch (key) {
+      case "agent":
+        navigate("/agent");
+        break;
+      case "chat":
+        navigate("/chat");
+        break;
+      case "knowledgeBase":
+        navigate("/knowledge-base");
+        break;
+    }
   };
 
   const items: TabsProps["items"] = [
@@ -59,7 +78,7 @@ const SideMenu: React.FC<SideMenuProps> = () => {
       children: (
         <AgentTabContent
           agents={agents}
-          onSelectAgent={() => {}}
+          onSelectAgent={() => navigate("/agent")}
           onCreateAgentClick={toggleAddAgentModal}
           onEditAgent={(agent) => {
             setEditingAgent(agent);

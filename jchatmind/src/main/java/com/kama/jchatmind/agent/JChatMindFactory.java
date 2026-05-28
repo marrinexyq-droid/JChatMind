@@ -79,8 +79,10 @@ public class JChatMindFactory {
     private List<Message> loadMemory(String chatSessionId) {
         int messageLength = agentConfig.getChatOptions().getMessageLength();
         List<ChatMessageDTO> chatMessages = chatMessageFacadeService.getChatMessagesBySessionIdRecently(chatSessionId, messageLength);
+        Collections.reverse(chatMessages); // SQL 是 DESC，这里转回 ASC 顺序
         List<Message> memory = new ArrayList<>();
         for (ChatMessageDTO chatMessageDTO : chatMessages) {
+            var meta = chatMessageDTO.getMetadata();
             switch (chatMessageDTO.getRole()) {
                 case SYSTEM:
                     if (!StringUtils.hasLength(chatMessageDTO.getContent())) continue;
@@ -93,16 +95,15 @@ public class JChatMindFactory {
                 case ASSISTANT:
                     memory.add(AssistantMessage.builder()
                             .content(chatMessageDTO.getContent())
-                            .toolCalls(chatMessageDTO.getMetadata()
-                                    .getToolCalls())
+                            .toolCalls(meta != null ? meta.getToolCalls() : null)
                             .build());
                     break;
                 case TOOL:
-                    memory.add(ToolResponseMessage.builder()
-                            .responses(List.of(chatMessageDTO
-                                    .getMetadata()
-                                    .getToolResponse()))
-                            .build());
+                    if (meta != null && meta.getToolResponse() != null) {
+                        memory.add(ToolResponseMessage.builder()
+                                .responses(List.of(meta.getToolResponse()))
+                                .build());
+                    }
                     break;
                 default:
                     log.error("不支持的 Message 类型: {}, content = {}",
@@ -164,6 +165,8 @@ public class JChatMindFactory {
             Tool tool = optionalToolMap.get(toolName);
             if (tool != null) {
                 runtimeTools.add(tool);
+            } else {
+                log.warn("未知的可选工具名: {}，已跳过", toolName);
             }
         }
         return runtimeTools;

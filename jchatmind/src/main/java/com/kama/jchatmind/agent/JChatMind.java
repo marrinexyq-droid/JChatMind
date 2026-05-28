@@ -68,6 +68,9 @@ public class JChatMind {
 
     private static final Integer DEFAULT_MAX_MESSAGES = 20;
 
+    // 工具返回结果存入 chatMemory 时的最大字符数，避免大量文本干扰 LLM 决策
+    private static final int MAX_TOOL_RESPONSE_LENGTH = 300;
+
     // SpringAI 自带的 ChatOptions, 不是 AgentDTO.ChatOptions
     private ChatOptions chatOptions;
 
@@ -124,11 +127,6 @@ public class JChatMind {
                 .maxMessages(maxMessages == null ? DEFAULT_MAX_MESSAGES : maxMessages)
                 .build();
         this.chatMemory.add(chatSessionId, memory);
-
-        // 添加系统提示
-        if (StringUtils.hasLength(systemPrompt)) {
-            this.chatMemory.add(chatSessionId, new SystemMessage(systemPrompt));
-        }
 
         // 关闭 SpringAI 自带的内部的工具调用自动执行功能
         this.chatOptions = DefaultToolCallingChatOptions.builder()
@@ -216,23 +214,42 @@ public class JChatMind {
         pendingChatMessages.clear();
     }
 
-    // thinkPrompt 应该放到 system 中还是
     private boolean think() {
-        String thinkPrompt = """
-                现在你是一个智能的的具体「决策模块」
-                请根据当前对话上下文，决定下一步的动作。
-                                \s
-                【额外信息】
-                - 你目前拥有的知识库列表以及描述：%s
-                - 如果有缺失的上下文时，优先从知识库中进行搜索
+        String thinkToolRules = """
+                判断意图并选择工具：
+                - 用户问天气 → 调用 queryWeather（参数 city 为城市名，没说城市就问）
+                - 用户查知识库/文档 → 调用 KnowledgeTool
+                - 其他 → 直接回答
+
+                【重要规则】
+                1. 如果工具结果已存在于对话中，直接用结果回答，不要再调工具
+                2. 不参考旧对话，只看本轮最新上下文
+
+                知识库：%s
                 """.formatted(this.availableKbs);
 
-        // 将 thinkPrompt 通过 .user(thinkPrompt) 的方式构造进入 chatClient 中
-        // 既能让每次 messageList 的最后一条是 本条提示词，
-        // 又能够避免将 thinkPrompt 加入到聊天记录中
+        String thinkPrompt = StringUtils.hasLength(this.systemPrompt)
+                ? this.systemPrompt + "\n\n---\n\n" + thinkToolRules
+                : thinkToolRules;
+
+        // 取最后一条用户消息及之后的所有消息（包含工具返回结果）
+        // 这样 LLM 在下一轮能看到工具返回，避免循环调用
+        List<Message> fullHistory = this.chatMemory.get(this.chatSessionId);
+        List<Message> thinkMessages = new ArrayList<>();
+        int lastUserIdx = -1;
+        for (int i = fullHistory.size() - 1; i >= 0; i--) {
+            if (fullHistory.get(i) instanceof UserMessage) {
+                lastUserIdx = i;
+                break;
+            }
+        }
+        if (lastUserIdx >= 0) {
+            thinkMessages.addAll(fullHistory.subList(lastUserIdx, fullHistory.size()));
+        }
+
         Prompt prompt = Prompt.builder()
                 .chatOptions(this.chatOptions)
-                .messages(this.chatMemory.get(this.chatSessionId))
+                .messages(thinkMessages)
                 .build();
 
         this.lastChatResponse = this.chatClient
@@ -245,20 +262,17 @@ public class JChatMind {
 
         Assert.notNull(lastChatResponse, "Last chat client response cannot be null");
 
-        AssistantMessage output = this.lastChatResponse
-                .getResult()
-                .getOutput();
+        var result = this.lastChatResponse.getResult();
+        Assert.notNull(result, "Chat response result cannot be null");
+        AssistantMessage output = result.getOutput();
 
         List<AssistantMessage.ToolCall> toolCalls = output.getToolCalls();
 
-        // 保存
         saveMessage(output);
         refreshPendingMessages();
 
-        // 打印工具调用
         logToolCalls(toolCalls);
 
-        // 如果工具调用不为空，则进入执行阶段
         return !toolCalls.isEmpty();
     }
 
@@ -277,12 +291,35 @@ public class JChatMind {
 
         ToolExecutionResult toolExecutionResult = toolCallingManager.executeToolCalls(prompt, this.lastChatResponse);
 
-        this.chatMemory.clear(this.chatSessionId);
-        this.chatMemory.add(this.chatSessionId, toolExecutionResult.conversationHistory());
+        List<Message> conversationHistory = toolExecutionResult.conversationHistory();
+        if (conversationHistory == null || conversationHistory.isEmpty()) {
+            log.warn("conversationHistory 为空，跳过 execute");
+            return;
+        }
+        Message lastMsg = conversationHistory.get(conversationHistory.size() - 1);
+        if (!(lastMsg instanceof ToolResponseMessage toolResponseMessage)) {
+            log.warn("最后一条消息不是 ToolResponseMessage，跳过 execute");
+            return;
+        }
 
-        ToolResponseMessage toolResponseMessage = (ToolResponseMessage) toolExecutionResult
-                .conversationHistory()
-                .get(toolExecutionResult.conversationHistory().size() - 1);
+        // 截断工具返回结果，避免大量文本干扰 LLM 后续决策
+        List<ToolResponseMessage.ToolResponse> truncatedResponses = toolResponseMessage.getResponses().stream()
+                .map(resp -> {
+                    String data = resp.responseData();
+                    if (data != null && data.length() > MAX_TOOL_RESPONSE_LENGTH) {
+                        data = data.substring(0, MAX_TOOL_RESPONSE_LENGTH) + "...(内容过长已截断)";
+                    }
+                    return new ToolResponseMessage.ToolResponse(resp.id(), resp.name(), data);
+                })
+                .toList();
+        List<Message> truncatedHistory = new ArrayList<>(conversationHistory);
+        truncatedHistory.set(truncatedHistory.size() - 1,
+                ToolResponseMessage.builder()
+                        .responses(truncatedResponses)
+                        .build());
+
+        this.chatMemory.clear(this.chatSessionId);
+        this.chatMemory.add(this.chatSessionId, truncatedHistory);
 
         String collect = toolResponseMessage.getResponses()
                 .stream()
@@ -291,7 +328,6 @@ public class JChatMind {
 
         log.info("工具调用结果：{}", collect);
 
-        // 保存工具调用
         saveMessage(toolResponseMessage);
         refreshPendingMessages();
 

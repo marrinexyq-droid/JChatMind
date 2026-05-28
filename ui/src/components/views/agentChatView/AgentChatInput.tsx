@@ -11,8 +11,11 @@ const AgentChatInput: React.FC<AgentChatInputProps> = ({ onSend }) => {
   return (
     <Sender
       onSubmit={() => {
-        onSend(message.trim());
-        setMessage("");
+        const trimmed = message.trim();
+        if (trimmed) {
+          onSend(trimmed);
+          setMessage("");
+        }
       }}
       placeholder="输入消息..."
       value={message}

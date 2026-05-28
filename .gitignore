@@ -1,0 +1,32 @@
+# --- IDE ---
+.idea/
+*.iml
+.vscode/
+__MACOSX/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Build ---
+target/
+node_modules/
+dist/
+build/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Env ---
+.env
+.env.local
+
+# --- Data ---
+data/
+*.sql
+!jchatmind/src/main/resources/**/*.sql
+
+# --- Temp ---
+.tmp/
+temp/

@@ -1,4 +1,5 @@
 import { get, post, patch, del, BASE_URL } from "./http.ts";
+import type { ApiResponse } from "./http.ts";
 import type { ChatMessageVO, MessageType } from "../types";
 
 // 类型定义
@@ -338,7 +339,7 @@ export async function uploadDocument(
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 
-  const apiResponse = await response.json();
+  const apiResponse: ApiResponse<CreateDocumentResponse> = await response.json();
   if (apiResponse.code !== 200) {
     throw new Error(apiResponse.message || "上传失败");
   }

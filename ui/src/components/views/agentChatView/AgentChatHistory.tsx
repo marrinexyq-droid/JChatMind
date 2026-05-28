@@ -220,9 +220,7 @@ const AgentChatHistory: React.FC<AgentChatHistoryProps> = ({
                     {/* 消息内容 */}
                     {message.content && (
                       <div>
-                        <XMarkdown
-                          streaming={{ enableAnimation: false, hasNextChunk: true }}
-                        >
+                        <XMarkdown>
                           {message.content}
                         </XMarkdown>
                       </div>

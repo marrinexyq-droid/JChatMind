@@ -2,6 +2,7 @@ package com.kama.jchatmind.agent.tools;
 
 import com.kama.jchatmind.service.RagService;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 
@@ -34,7 +35,13 @@ public class KnowledgeTools implements Tool {
             description = "从指定知识库中执行相似性检索（RAG）。参数为知识库 ID（kbsId）和查询文本（query），返回与查询最相关的知识片段。"
     )
     public String knowledgeQuery(String kbsId, String query) {
+        if (!StringUtils.hasLength(kbsId) || !StringUtils.hasLength(query)) {
+            return "参数错误：kbsId 和 query 不能为空";
+        }
         List<String> strings = ragService.similaritySearch(kbsId, query);
+        if (strings == null || strings.isEmpty()) {
+            return "未找到相关内容";
+        }
         return String.join("\n", strings);
     }
 }

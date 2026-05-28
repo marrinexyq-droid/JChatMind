@@ -19,7 +19,6 @@ import { useChatSessions } from "../../../hooks/useChatSessions.ts";
 const { Title, Text } = Typography;
 
 interface DefaultAgentChatViewProps {
-  handleSendMessage: (message: string) => void;
   loading: boolean;
   agents: AgentVO[];
 }

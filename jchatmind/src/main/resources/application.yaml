@@ -9,8 +9,8 @@ spring:
   mail:
     host: smtp.qq.com
     port: 587
-    username: your-email
-    password: your-password # 邮箱授权码
+    username: 1598826374@qq.com
+    password: wkjydaedaibbfdja # 邮箱授权码
     default-encoding: UTF-8
     properties:
       mail:
@@ -21,13 +21,13 @@ spring:
             required: true
   ai:
     deepseek:
-      api-key: your-api-key
+      api-key: sk-2188cc99eb2e4ecc8558462784667ede
       base-url: https://api.deepseek.com
       chat:
         options:
           model: deepseek-chat
     zhipuai:
-      api-key: your-api-key
+      api-key: 63885f67282d4d1d9b2968fdd55a3156.mOw9PJtTN3boYD7H
       base-url: https://open.bigmodel.cn/api/paas
       chat:
         options:
