@@ -1,145 +1,154 @@
-import React, { useEffect, useState } from "react";
-import { RobotOutlined } from "@ant-design/icons";
-import { Tabs, type TabsProps } from "antd";
 import { useNavigate, useLocation } from "react-router-dom";
-import AgentTabContent from "./tabs/AgentTabContent.tsx";
-import AddAgentModal from "./modals/AddAgentModal.tsx";
+import { PlusOutlined, RobotOutlined, BookOutlined, CompassOutlined } from "@ant-design/icons";
 import ChatTabContent from "./tabs/ChatTabContent.tsx";
-import KnowledgeBaseTabContent from "./tabs/KnowledgeBaseTabContent.tsx";
-import AddKnowledgeBaseModal from "./modals/AddKnowledgeBaseModal.tsx";
-import { useAgents } from "../hooks/useAgents.ts";
-import { useKnowledgeBases } from "../hooks/useKnowledgeBases.ts";
 
-const SideMenu: React.FC = () => {
+interface SideMenuProps {
+  onCreateAgentClick: () => void;
+  onEditAgent: (agent: import("../api/api.ts").AgentVO) => void;
+  onDeleteAgent: (agentId: string) => void;
+  onCreateKnowledgeBaseClick: () => void;
+}
+
+export default function SideMenu({
+  onCreateAgentClick,
+  onEditAgent: _onEditAgent,
+  onDeleteAgent: _onDeleteAgent,
+  onCreateKnowledgeBaseClick,
+}: SideMenuProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
-  const toggleAddAgentModal = () => {
-    setIsAddAgentModalOpen(!isAddAgentModalOpen);
-    setEditingAgent(null);
-  };
-
-  const [editingAgent, setEditingAgent] = useState<
-    import("../api/api.ts").AgentVO | null
-  >(null);
-
-  /**
-   * 添加知识库模态框状态
-   */
-  const [isAddKnowledgeBaseModalOpen, setIsAddKnowledgeBaseModalOpen] =
-    useState(false);
-  const toggleAddKnowledgeBaseModal = () => {
-    setIsAddKnowledgeBaseModalOpen(!isAddKnowledgeBaseModalOpen);
-  };
-  const { agents, createAgentHandle, deleteAgentHandle, updateAgentHandle } =
-    useAgents();
-
-  const [activeKey, setActiveKey] = useState(() => {
-    if (location.pathname.startsWith("/agent")) return "agent";
-    if (location.pathname.startsWith("/knowledge-base")) return "knowledgeBase";
-    if (location.pathname.startsWith("/chat")) return "chat";
-    return "agent";
-  });
-
-  const { knowledgeBases, createKnowledgeBaseHandle } = useKnowledgeBases();
-
-  // URL 变化时同步 activeKey
-  useEffect(() => {
-    if (location.pathname.startsWith("/agent")) {
-      setActiveKey("agent");
-    } else if (location.pathname.startsWith("/knowledge-base")) {
-      setActiveKey("knowledgeBase");
-    } else if (location.pathname.startsWith("/chat")) {
-      setActiveKey("chat");
-    }
-  }, [location.pathname]);
-
-  // 处理标签页切换
-  const handleTabChange = (key: string) => {
-    setActiveKey(key);
-    switch (key) {
-      case "agent":
-        navigate("/agent");
-        break;
-      case "chat":
-        navigate("/chat");
-        break;
-      case "knowledgeBase":
-        navigate("/knowledge-base");
-        break;
-    }
-  };
-
-  const items: TabsProps["items"] = [
-    {
-      key: "agent",
-      label: <span className="select-none">智能体助手</span>,
-      children: (
-        <AgentTabContent
-          agents={agents}
-          onSelectAgent={() => navigate("/agent")}
-          onCreateAgentClick={toggleAddAgentModal}
-          onEditAgent={(agent) => {
-            setEditingAgent(agent);
-            setIsAddAgentModalOpen(true);
-          }}
-          onDeleteAgent={deleteAgentHandle}
-        />
-      ),
-    },
-    {
-      key: "chat",
-      label: <span className="select-none">聊天记录</span>,
-      children: <ChatTabContent />,
-    },
-    {
-      key: "knowledgeBase",
-      label: <span className="select-none">知识库</span>,
-      children: (
-        <KnowledgeBaseTabContent
-          knowledgeBases={knowledgeBases}
-          onCreateKnowledgeBaseClick={toggleAddKnowledgeBaseModal}
-          onSelectKnowledgeBase={(knowledgeBaseId) => {
-            navigate(`/knowledge-base/${knowledgeBaseId}`);
-          }}
-        />
-      ),
-    },
-  ];
-
   return (
-    <div className="px-4 flex flex-col h-full">
-      <div className="h-14 w-full flex items-center border-b border-gray-200">
-        <div className="flex items-center gap-2.5 mx-4">
-          <RobotOutlined className="text-xl text-indigo-600" />
-          <div className="text-lg font-semibold select-none text-gray-900">
-            JChatMind
-          </div>
+    <div className="flex flex-col h-full">
+      {/* New chat button */}
+      <div className="px-4 pt-3 pb-2">
+        <button
+          onClick={() => {
+            (window as any).petActions?.setCurious?.();
+            navigate("/chat");
+          }}
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-sm font-medium"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            color: "var(--text-primary)",
+            border: "1px solid var(--glass-border)",
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.08)"}
+          onMouseLeave={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
+        >
+          <PlusOutlined className="text-base" />
+          <span>新对话</span>
+        </button>
+      </div>
+
+      {/* Recent chats */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-2">
+        <ChatTabContent />
+      </div>
+
+      {/* Bottom nav */}
+      <div className="px-3 py-3 border-t" style={{ borderColor: "var(--glass-border)" }}>
+        <div className="flex items-center justify-between px-3 py-2.5 rounded-lg text-sm"
+          style={{ color: "var(--text-muted)" }}>
+          <span className="text-xs font-semibold uppercase tracking-wider">管理</span>
         </div>
+
+        {/* Agent nav + create button */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => {
+              (window as any).petActions?.setCurious?.();
+              navigate("/agent");
+            }}
+            className="flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm"
+            style={{
+              color: location.pathname.startsWith("/agent") ? "var(--text-primary)" : "var(--text-secondary)",
+              background: location.pathname.startsWith("/agent") ? "rgba(255,255,255,0.06)" : "transparent",
+            }}
+            onMouseEnter={(e) => {
+              if (!location.pathname.startsWith("/agent"))
+                e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+            }}
+            onMouseLeave={(e) => {
+              if (!location.pathname.startsWith("/agent"))
+                e.currentTarget.style.background = "transparent";
+            }}
+          >
+            <span className="text-base"><RobotOutlined /></span>
+            <span>智能体管理</span>
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onCreateAgentClick(); }}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors shrink-0"
+            title="新建智能体"
+            style={{ color: "var(--text-muted)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
+          >
+            <PlusOutlined className="text-xs" />
+          </button>
+        </div>
+
+        {/* KB nav + create button */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => {
+              (window as any).petActions?.setCurious?.();
+              navigate("/knowledge-base");
+            }}
+            className="flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm"
+            style={{
+              color: location.pathname.startsWith("/knowledge-base") ? "var(--text-primary)" : "var(--text-secondary)",
+              background: location.pathname.startsWith("/knowledge-base") ? "rgba(255,255,255,0.06)" : "transparent",
+            }}
+            onMouseEnter={(e) => {
+              if (!location.pathname.startsWith("/knowledge-base"))
+                e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+            }}
+            onMouseLeave={(e) => {
+              if (!location.pathname.startsWith("/knowledge-base"))
+                e.currentTarget.style.background = "transparent";
+            }}
+          >
+            <span className="text-base"><BookOutlined /></span>
+            <span>知识库</span>
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onCreateKnowledgeBaseClick(); }}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors shrink-0"
+            title="新建知识库"
+            style={{ color: "var(--text-muted)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
+          >
+            <PlusOutlined className="text-xs" />
+          </button>
+        </div>
+
+        {/* Planetarium nav */}
+        <button
+          onClick={() => {
+            (window as any).petActions?.setCurious?.();
+            navigate("/planetarium");
+          }}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm mt-1"
+          style={{
+            color: location.pathname === "/planetarium" ? "var(--text-primary)" : "var(--text-secondary)",
+            background: location.pathname === "/planetarium" ? "rgba(255,255,255,0.06)" : "transparent",
+          }}
+          onMouseEnter={(e) => {
+            if (location.pathname !== "/planetarium")
+              e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+          }}
+          onMouseLeave={(e) => {
+            if (location.pathname !== "/planetarium")
+              e.currentTarget.style.background = "transparent";
+          }}
+        >
+          <span className="text-base"><CompassOutlined /></span>
+          <span>赛博行星仪</span>
+        </button>
       </div>
-      <div className="flex-1 min-h-0 flex flex-col">
-        <Tabs
-          activeKey={activeKey}
-          onChange={handleTabChange}
-          items={items}
-          // className="h-full flex flex-col [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-content]:h-full [&_.ant-tabs-tabpane]:h-full"
-        />
-      </div>
-      <AddAgentModal
-        open={isAddAgentModalOpen}
-        onClose={toggleAddAgentModal}
-        createAgentHandle={createAgentHandle}
-        updateAgentHandle={updateAgentHandle}
-        editingAgent={editingAgent}
-      />
-      <AddKnowledgeBaseModal
-        open={isAddKnowledgeBaseModalOpen}
-        onClose={toggleAddKnowledgeBaseModal}
-        createKnowledgeBaseHandle={createKnowledgeBaseHandle}
-      />
     </div>
   );
-};
-
-export default SideMenu;
+}

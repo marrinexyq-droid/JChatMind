@@ -125,36 +125,12 @@ public class ChatMessageFacadeServiceImpl implements ChatMessageFacadeService {
 
     @Override
     public CreateChatMessageResponse appendChatMessage(String chatMessageId, String appendContent) {
-        // 查询现有的聊天消息
-        ChatMessage existingChatMessage = chatMessageMapper.selectById(chatMessageId);
-        if (existingChatMessage == null) {
-            throw new BizException("聊天消息不存在: " + chatMessageId);
-        }
-
-        // 将追加内容添加到现有内容后面
-        String currentContent = existingChatMessage.getContent() != null
-                ? existingChatMessage.getContent()
-                : "";
-        String updatedContent = currentContent + appendContent;
-
-        // 创建更新后的消息对象
-        ChatMessage updatedChatMessage = ChatMessage.builder()
-                .id(existingChatMessage.getId())
-                .sessionId(existingChatMessage.getSessionId())
-                .role(existingChatMessage.getRole())
-                .content(updatedContent)
-                .metadata(existingChatMessage.getMetadata())
-                .createdAt(existingChatMessage.getCreatedAt())
-                .updatedAt(LocalDateTime.now())
-                .build();
-
-        // 更新数据库
-        int result = chatMessageMapper.updateById(updatedChatMessage);
+        // 使用 SQL 原子追加，避免 read-modify-write 竞态
+        int result = chatMessageMapper.appendContent(chatMessageId, appendContent);
         if (result <= 0) {
-            throw new BizException("追加聊天消息内容失败");
+            throw new BizException("追加聊天消息内容失败: " + chatMessageId);
         }
 
-        // 返回聊天消息ID
         return CreateChatMessageResponse.builder()
                 .chatMessageId(chatMessageId)
                 .build();

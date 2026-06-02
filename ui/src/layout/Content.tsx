@@ -1,11 +1,11 @@
-import React from "react";
-
 interface ContentProps {
   children: React.ReactNode;
 }
 
-const Content: React.FC<ContentProps> = ({ children }) => {
-  return <div className="h-full flex-1">{children}</div>;
-};
-
-export default Content;
+export default function Content({ children }: ContentProps) {
+  return (
+    <main className="flex-1 relative overflow-hidden">
+      {children}
+    </main>
+  );
+}

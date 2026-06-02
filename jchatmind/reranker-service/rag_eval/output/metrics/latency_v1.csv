@@ -1,0 +1,4 @@
+模式,P50_ms,P95_ms,Mean_ms
+vector,92.1,100.4,91.2
+hybrid,92.8,101.0,92.0
+hybrid-rerank,8390.8,8770.8,8398.6

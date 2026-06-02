@@ -22,6 +22,7 @@ export interface ToolResponse {
 export interface ChatMessageVOMetadata {
   toolCalls?: ToolCall[];
   toolResponse?: ToolResponse;
+  feedback?: "like" | "dislike" | null;
 }
 
 export interface ChatMessageVO {
@@ -34,6 +35,7 @@ export interface ChatMessageVO {
 
 export type SseMessageType =
   | "AI_GENERATED_CONTENT"
+  | "AI_STREAMING_CHUNK"
   | "AI_PLANNING"
   | "AI_THINKING"
   | "AI_EXECUTING"
@@ -42,7 +44,7 @@ export type SseMessageType =
 export interface SseMessagePayload {
   message: ChatMessageVO;
   statusText: string;
-  done: boolean;
+  done?: boolean;
 }
 
 export interface SseMessageMetadata {

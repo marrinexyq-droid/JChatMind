@@ -9,6 +9,13 @@ export interface ChatOptions {
   messageLength?: number;
 }
 
+export type RagMode = "vector" | "hybrid" | "hybrid-rerank";
+
+export interface RagConfig {
+  topK?: number;
+  mode?: RagMode;
+}
+
 export type ModelType = "deepseek-chat" | "glm-4.6";
 
 export interface CreateAgentRequest {
@@ -19,6 +26,7 @@ export interface CreateAgentRequest {
   allowedTools?: string[];
   allowedKbs?: string[];
   chatOptions?: ChatOptions;
+  ragConfig?: RagConfig;
 }
 
 export interface UpdateAgentRequest {
@@ -29,6 +37,7 @@ export interface UpdateAgentRequest {
   allowedTools?: string[];
   allowedKbs?: string[];
   chatOptions?: ChatOptions;
+  ragConfig?: RagConfig;
 }
 
 export interface CreateAgentResponse {
@@ -44,6 +53,7 @@ export interface AgentVO {
   allowedTools?: string[];
   allowedKbs?: string[];
   chatOptions?: ChatOptions;
+  ragConfig?: RagConfig;
   createdAt?: string;
   updatedAt?: string;
 }

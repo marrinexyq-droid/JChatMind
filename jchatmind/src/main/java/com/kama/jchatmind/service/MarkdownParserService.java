@@ -12,12 +12,19 @@ import java.util.List;
  */
 public interface MarkdownParserService {
     /**
-     * 解析 Markdown 文件，提取标题和对应的内容
-     *
-     * @param inputStream Markdown 文件输入流
-     * @return 标题和内容的列表，每个元素包含标题和该标题下的内容
+     * 解析标准 Markdown 文件，按标题分块
      */
     List<MarkdownSection> parseMarkdown(InputStream inputStream);
+
+    /**
+     * 解析 Gemini 格式文档（====== 父切片 / ------ 子切片 标记），用于 RAG 评估
+     * 默认不支持，由 GeminiDocParser 实现
+     */
+    default List<MarkdownSection> parseGeminiFormat(InputStream inputStream) {
+        throw new UnsupportedOperationException(
+                "Gemini format parsing requires GeminiDocParser. " +
+                "Use parseMarkdown() for standard markdown files.");
+    }
     
     /**
      * Markdown 章节数据类

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { message as antdMessage } from "antd";
 import AgentChatHistory from "./agentChatView/AgentChatHistory.tsx";
@@ -10,53 +10,67 @@ import {
   getChatSession,
 } from "../../api/api.ts";
 import { BASE_URL } from "../../api/http.ts";
-import { useAgents } from "../../hooks/useAgents.ts";
+import { useAgents } from "../../hooks/useAgents.tsx";
 import { useChatSessions } from "../../hooks/useChatSessions.ts";
 import EmptyAgentChatView from "./agentChatView/EmptyAgentChatView.tsx";
 import type { ChatMessageVO, SseMessage, SseMessageType } from "../../types";
 
-const AgentChatView: React.FC = () => {
+export default function AgentChatView() {
   const { chatSessionId } = useParams<{ chatSessionId: string }>();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const { agents } = useAgents();
   const { refreshChatSessions } = useChatSessions();
-
   const [messages, setMessages] = useState<ChatMessageVO[]>([]);
+  const [feedbackMap, setFeedbackMap] = useState<Record<string, "like" | "dislike" | null>>({});
+  const [agentId, setAgentId] = useState("");
 
-  const addMessage = (message: ChatMessageVO) => {
-    setMessages((prevMessages) => [...prevMessages, message]);
+  const handleFeedback = (messageId: string, type: "like" | "dislike") => {
+    setFeedbackMap((prev) => ({ ...prev, [messageId]: prev[messageId] === type ? null : type }));
   };
 
-  const [agentId, setAgentId] = useState<string>("");
+  const handleRegenerate = async (messageId: string) => {
+    if (!chatSessionId) return;
+    // Find the last user message before the clocked assistant message
+    const idx = messages.findIndex((m) => m.id === messageId);
+    const prevUserMsg = messages.slice(0, idx).reverse().find((m) => m.role === "user");
+    const content = prevUserMsg?.content || "";
+    if (!content) return;
+
+    handleSendMessage(content);
+  };
+
+  const upsertMessage = (message: ChatMessageVO) =>
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === message.id);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = {
+          ...updated[idx],
+          content: updated[idx].content + (message.content || ""),
+          metadata: message.metadata || updated[idx].metadata,
+        };
+        return updated;
+      }
+      return [...prev, message];
+    });
 
   const getChatMessages = useCallback(async () => {
-    if (!chatSessionId) {
-      return;
-    }
+    if (!chatSessionId) return;
     const resp = await getChatMessagesBySessionId(chatSessionId);
     setMessages(resp.chatMessages);
-
-    const fetchData = async () => {
-      const resp = await getChatSession(chatSessionId);
-      // setChatSession(resp.chatSession);
-      setAgentId(resp.chatSession.agentId);
-    };
-    fetchData().then();
+    getChatSession(chatSessionId).then((resp) => setAgentId(resp.chatSession.agentId));
   }, [chatSessionId]);
 
   useEffect(() => {
-    if (!chatSessionId) {
-      return;
-    }
-    getChatMessages().then();
+    if (!chatSessionId) return;
+    getChatMessages();
   }, [chatSessionId, getChatMessages]);
 
   const handleSendMessage = async (message: string) => {
+    if (!message.trim()) return;
+    (window as any).petActions?.setThink?.();
 
-    if (!message || !message.trim()) return;
-
-    // 如果没有 chatSessionId，创建新会话
     if (!chatSessionId) {
       if (!agentId) {
         antdMessage.warning("请先创建一个智能体助手");
@@ -64,23 +78,15 @@ const AgentChatView: React.FC = () => {
       }
       setLoading(true);
       try {
-        const response = await createChatSession({
-          agentId: agentId,
-          title: message.slice(0, 20),
-        });
-        // 创建会话后立即发送首条消息
+        const response = await createChatSession({ agentId, title: message.slice(0, 20) });
         await createChatMessage({
-          agentId: agentId,
+          agentId,
           sessionId: response.chatSessionId,
           role: "user",
           content: message,
         });
-        // 刷新聊天会话列表
         await refreshChatSessions();
-        // 导航到新创建的会话
-        navigate(`/chat/${response.chatSessionId}`, {
-          replace: true,
-        });
+        navigate(`/chat/${response.chatSessionId}`, { replace: true });
       } catch (error) {
         console.error("创建聊天会话失败:", error);
         antdMessage.error("创建聊天会话失败，请重试");
@@ -88,59 +94,63 @@ const AgentChatView: React.FC = () => {
         setLoading(false);
       }
     } else {
-      console.log("ask", message);
-      await createChatMessage({
-        agentId: agentId ?? "",
+      // Add user message locally, let SSE push AI response
+      const tempId = `user-${Date.now()}`;
+      upsertMessage({
+        id: tempId,
         sessionId: chatSessionId,
         role: "user",
         content: message,
       });
-      await getChatMessages();
+      await createChatMessage({
+        agentId: agentId || "",
+        sessionId: chatSessionId,
+        role: "user",
+        content: message,
+      });
+      // No getChatMessages() — avoids overwriting SSE-streamed AI response
     }
   };
 
-  const [displayAgentStatus, setDisplayAgentStatus] = useState<boolean>(false);
+  const [displayAgentStatus, setDisplayAgentStatus] = useState(false);
   const [agentStatusText, setAgentStatusText] = useState("");
-  const [agentStatusType, setAgentStatusType] = useState<
-    SseMessageType | undefined
-  >(undefined);
+  const [agentStatusType, setAgentStatusType] = useState<SseMessageType | undefined>();
 
   useEffect(() => {
-    // sse 连接处理, 不是对话消息不开连接
-    if (!chatSessionId) {
-      return;
-    }
-    // SSE 端点不在 /api 路径下，从 BASE_URL 推导根地址
+    if (!chatSessionId) return;
     const baseRoot = BASE_URL.replace("/api", "");
     const es = new EventSource(`${baseRoot}/sse/connect/${chatSessionId}`);
-    es.onerror = (error) => {
-      console.error("SSE error:", error);
-    };
+
+    es.onerror = (error) => console.error("SSE error:", error);
 
     es.addEventListener("message", (event) => {
-      // 解析 JSON
-      const message = JSON.parse(event.data) as SseMessage;
-      if (message.type === "AI_GENERATED_CONTENT") {
-        // 将 AI 生成的内容存到 messages 中
-        addMessage(message.payload.message);
-      } else if (message.type === "AI_PLANNING") {
+      const msg = JSON.parse(event.data) as SseMessage;
+      if (msg.type === "AI_GENERATED_CONTENT") {
+        upsertMessage(msg.payload.message);
+      } else if (msg.type === "AI_STREAMING_CHUNK") {
+        upsertMessage(msg.payload.message);
+        if (msg.payload.done) {
+          (window as any).petActions?.setExcite?.();
+        }
+      } else if (msg.type === "AI_PLANNING") {
         setDisplayAgentStatus(true);
-        setAgentStatusText(message.payload.statusText);
+        setAgentStatusText(msg.payload.statusText);
         setAgentStatusType("AI_PLANNING");
-      } else if (message.type === "AI_THINKING") {
+      } else if (msg.type === "AI_THINKING") {
         setDisplayAgentStatus(true);
-        setAgentStatusText(message.payload.statusText);
+        setAgentStatusText(msg.payload.statusText);
         setAgentStatusType("AI_THINKING");
-      } else if (message.type === "AI_EXECUTING") {
+      } else if (msg.type === "AI_EXECUTING") {
         setDisplayAgentStatus(true);
-        setAgentStatusText(message.payload.statusText);
+        setAgentStatusText(msg.payload.statusText);
         setAgentStatusType("AI_EXECUTING");
-      } else if (message.type === "AI_DONE") {
+      } else if (msg.type === "AI_DONE") {
         setDisplayAgentStatus(false);
         setAgentStatusText("");
         setAgentStatusType(undefined);
+        (window as any).petActions?.setExcite?.();
       } else {
-        throw new Error(`Unknown message type: ${message.type}`);
+        throw new Error(`Unknown message type: ${msg.type}`);
       }
     });
 
@@ -149,22 +159,14 @@ const AgentChatView: React.FC = () => {
     });
 
     return () => {
-      console.log("Closing SSE connection.");
       es.close();
     };
   }, [chatSessionId]);
 
-  // 如果没有 chatSessionId，显示提示界面
   if (!chatSessionId) {
-    return (
-      <EmptyAgentChatView
-        agents={agents}
-        loading={loading}
-      />
-    );
+    return <EmptyAgentChatView agents={agents} loading={loading} />;
   }
 
-  // 如果有 chatSessionId，显示正常的聊天界面
   return (
     <div className="flex flex-col h-full">
       <AgentChatHistory
@@ -172,12 +174,13 @@ const AgentChatView: React.FC = () => {
         displayAgentStatus={displayAgentStatus}
         agentStatusText={agentStatusText}
         agentStatusType={agentStatusType}
+        feedbackMap={feedbackMap}
+        onFeedback={handleFeedback}
+        onRegenerate={handleRegenerate}
       />
-      <div className="border-t border-gray-200 p-4 bg-white">
+      <div className="absolute bottom-6 left-6 right-6 z-10 max-w-3xl mx-auto">
         <AgentChatInput onSend={handleSendMessage} />
       </div>
     </div>
   );
-};
-
-export default AgentChatView;
+}

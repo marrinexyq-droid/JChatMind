@@ -22,7 +22,6 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.*;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
-import org.springframework.aop.support.AopUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -95,7 +94,8 @@ public class JChatMindFactory {
                 case ASSISTANT:
                     memory.add(AssistantMessage.builder()
                             .content(chatMessageDTO.getContent())
-                            .toolCalls(meta != null ? meta.getToolCalls() : null)
+                            .toolCalls(meta != null && meta.getToolCalls() != null
+                                    ? meta.getToolCalls() : List.of())
                             .build());
                     break;
                 case TOOL:
@@ -187,9 +187,10 @@ public class JChatMindFactory {
 
     private Object resolveToolTarget(Tool tool) {
         try {
-            return AopUtils.isAopProxy(tool)
-                    ? AopUtils.getTargetClass(tool)
-                    : tool;
+            // AOP 代理对象直接传给 MethodToolCallbackProvider，
+            // 它会通过 AopUtils.getTargetClass() 内部解析 @Tool 方法。
+            // 之前错误地返回了 Class<?> 而非实例，导致代理工具注册失败。
+            return tool;
         } catch (Exception e) {
             throw new IllegalStateException(
                     "解析工具目标对象失败: " + tool.getName(), e);

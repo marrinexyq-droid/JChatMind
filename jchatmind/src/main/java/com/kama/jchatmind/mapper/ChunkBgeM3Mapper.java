@@ -27,4 +27,16 @@ public interface ChunkBgeM3Mapper {
             @Param("vectorLiteral") String vectorLiteral,
             @Param("limit") int limit
     );
+
+    List<ChunkBgeM3> bm25Search(
+            @Param("kbId") String kbId,
+            @Param("query") String query,
+            @Param("limit") int limit
+    );
+
+    void ensureTsvColumn();
+
+    void ensureTsvIndex();
+
+    void ensureHnswIndex();
 }

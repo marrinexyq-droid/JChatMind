@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
@@ -24,6 +25,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<?> handle404(NoResourceFoundException e) {
         return ResponseEntity.notFound().build();
+    }
+
+    /**
+     * SSE 连接超时，response 已提交，无需返回任何内容。
+     * 避免泛型 Exception handler 尝试以 text/event-stream 序列化 ApiResponse 导致二次异常。
+     */
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public void handleAsyncRequestTimeout(AsyncRequestTimeoutException e) {
+        log.debug("SSE 连接超时");
     }
 
     /**

@@ -1,16 +1,19 @@
 import React, { useEffect, useState } from "react";
-import { Button, Checkbox, Input, Modal, Select, Slider } from "antd";
+import { Button, Checkbox, Input, Select, Slider } from "antd";
 import TextArea from "antd/es/input/TextArea";
 import { SaveOutlined } from "@ant-design/icons";
+import { motion, AnimatePresence } from "framer-motion";
+import GlassModal from "./GlassModal.tsx";
 import {
   type CreateAgentRequest,
   type UpdateAgentRequest,
   type AgentVO,
   type ModelType,
+  type RagMode,
   getOptionalTools,
   type ToolVO,
 } from "../../api/api.ts";
-import { useKnowledgeBases } from "../../hooks/useKnowledgeBases.ts";
+import { useKnowledgeBases } from "../../hooks/useKnowledgeBases.tsx";
 
 interface AddAgentModalProps {
   open: boolean;
@@ -27,9 +30,7 @@ const menuItems = [
   { key: "base", label: "基础设置" },
   { key: "model", label: "模型设置" },
   { key: "knowledge", label: "知识库设置" },
-  // { key: "mcp", label: "MCP 服务器" },
   { key: "tools", label: "工具调用" },
-  // { key: "memory", label: "全局记忆" },
 ];
 
 const AddAgentModal: React.FC<AddAgentModalProps> = ({
@@ -61,6 +62,10 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
       topP: 1.0,
       messageLength: 20,
     },
+    ragConfig: {
+      topK: 10,
+      mode: "hybrid-rerank" as RagMode,
+    },
   });
 
   const [createAgentLoading, setCreateAgentLoading] = useState(false);
@@ -80,6 +85,10 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
           topP: 1.0,
           messageLength: 10,
         },
+        ragConfig: editingAgent.ragConfig || {
+          topK: 10,
+          mode: "hybrid-rerank" as RagMode,
+        },
       });
     } else {
       // 重置表单
@@ -94,6 +103,10 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
           temperature: 0.7,
           topP: 1.0,
           messageLength: 10,
+        },
+        ragConfig: {
+          topK: 10,
+          mode: "hybrid-rerank" as RagMode,
         },
       });
     }
@@ -115,25 +128,48 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
 
   const isEditMode = !!editingAgent;
 
+  const menuItemStyle = (isSelected: boolean) => ({
+    background: isSelected ? "rgba(168, 85, 247, 0.08)" : "transparent",
+    color: isSelected ? "#7c3aed" : "#8b7fae",
+    border: isSelected ? "1px solid rgba(168, 85, 247, 0.15)" : "1px solid transparent",
+  });
+
+  const labelStyle = "block font-semibold mb-1";
+  const labelColor = { color: "#c4b5fd" };
+
+  const panelVariants = {
+    initial: { opacity: 0, x: 12 },
+    animate: { opacity: 1, x: 0 },
+    exit: { opacity: 0, x: -12 },
+    transition: { duration: 0.2, ease: "easeOut" as const },
+  };
+
   return (
-    <Modal
+    <GlassModal
       open={open}
-      onCancel={onClose}
+      onClose={onClose}
       title={isEditMode ? "编辑智能体" : "智能体助手"}
-      footer={null}
       width={800}
-      centered
     >
-      <div className="flex h-[500px]">
-        <div className="w-[150px] h-full border-r border-gray-200 pr-2">
-          <div className="flex flex-col gap-0.5 select-none cursor-pointer">
+      <div className="flex" style={{ height: "500px" }}>
+        {/* Left sidebar menu */}
+        <div
+          className="h-full"
+          style={{
+            width: "150px",
+            borderRight: "1px solid rgba(168, 85, 247, 0.08)",
+            padding: "8px 8px",
+          }}
+        >
+          <div className="flex flex-col gap-1 select-none cursor-pointer">
             {menuItems.map((item) => {
               const isSelected = selectedKey === item.key;
               return (
                 <div
                   key={item.key}
                   onClick={() => setSelectedKey(item.key)}
-                  className={`px-3 py-2 rounded-lg hover:bg-gray-100 ${isSelected ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600"}`}
+                  className="px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200"
+                  style={menuItemStyle(isSelected)}
                 >
                   {item.label}
                 </div>
@@ -141,361 +177,370 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
             })}
           </div>
         </div>
+        {/* Right content */}
         <div className="flex-1 h-full flex flex-col min-h-0">
-          <div className="flex-1 px-4 overflow-y-auto min-h-0">
-            {selectedKey === "base" && (
-              <div>
-                <div className="mb-3">
-                  <label className="block text-gray-700 font-medium mb-1">
-                    名称
-                  </label>
-                  <div className="flex items-center">
-                    <Input
-                      placeholder="请输入智能体名称"
-                      value={formData.name}
+          <div className="flex-1 px-5 py-2 overflow-y-auto min-h-0">
+            <AnimatePresence mode="wait">
+              {selectedKey === "base" && (
+                <motion.div key="base" {...panelVariants}>
+                  <div className="mb-3">
+                    <label className={labelStyle} style={labelColor}>名称</label>
+                    <div className="flex items-center">
+                      <Input
+                        placeholder="请输入智能体名称"
+                        value={formData.name}
+                        onChange={(e) =>
+                          setFormData({ ...formData, name: e.target.value })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="mb-3">
+                    <label className={labelStyle} style={labelColor}>描述</label>
+                    <TextArea
+                      placeholder="请输入智能体描述"
+                      rows={2}
+                      value={formData.description}
                       onChange={(e) =>
-                        setFormData({ ...formData, name: e.target.value })
+                        setFormData({ ...formData, description: e.target.value })
                       }
                     />
                   </div>
-                </div>
-                <div className="mb-3">
-                  <label className="block text-gray-700 font-medium mb-1">
-                    描述
-                  </label>
-                  <TextArea
-                    placeholder="请输入智能体描述"
-                    rows={2}
-                    value={formData.description}
-                    onChange={(e) =>
-                      setFormData({ ...formData, description: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="mb-3">
-                  <label className="block text-gray-700 font-medium mb-1">
-                    提示词
-                  </label>
-                  <TextArea
-                    placeholder="默认提示词"
-                    rows={11}
-                    value={formData.systemPrompt}
-                    onChange={(e) =>
-                      setFormData({ ...formData, systemPrompt: e.target.value })
-                    }
-                  />
-                </div>
-              </div>
-            )}
-            {selectedKey === "model" && (
-              <div>
-                <div className="mb-4">
-                  <label className="block text-gray-700 font-medium mb-1">
-                    选择模型
-                  </label>
-                  <Select
-                    options={[
-                      {
-                        value: "deepseek-chat",
-                        label: "deepseek-chat",
-                      },
-                      {
-                        value: "glm-4.6",
-                        label: "glm-4.6",
-                      },
-                    ]}
-                    placeholder="请选择模型"
-                    style={{ width: "300px" }}
-                    value={formData.model}
-                    onChange={(value: ModelType) =>
-                      setFormData({ ...formData, model: value })
-                    }
-                  />
-                </div>
-                <div className="mb-4">
-                  <label className="block text-gray-700 font-medium mb-2">
-                    模型参数
-                  </label>
-                  <div className="space-y-4">
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="block text-sm text-gray-600">
-                          Temperature（温度）
-                          <span className="text-gray-400 ml-1 text-xs">
-                            (0.0 - 2.0)
+                  <div className="mb-3">
+                    <label className={labelStyle} style={labelColor}>提示词</label>
+                    <TextArea
+                      placeholder="默认提示词"
+                      rows={11}
+                      value={formData.systemPrompt}
+                      onChange={(e) =>
+                        setFormData({ ...formData, systemPrompt: e.target.value })
+                      }
+                    />
+                  </div>
+                </motion.div>
+              )}
+              {selectedKey === "model" && (
+                <motion.div key="model" {...panelVariants}>
+                  <div className="mb-4">
+                    <label className={labelStyle} style={labelColor}>选择模型</label>
+                    <Select
+                      options={[
+                        { value: "deepseek-chat", label: "deepseek-chat" },
+                        { value: "glm-4.6", label: "glm-4.6" },
+                      ]}
+                      placeholder="请选择模型"
+                      style={{ width: "300px" }}
+                      value={formData.model}
+                      onChange={(value: ModelType) =>
+                        setFormData({ ...formData, model: value })
+                      }
+                    />
+                  </div>
+                  <div className="mb-4">
+                    <label className={labelStyle} style={labelColor}>模型参数</label>
+                    <div className="space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm text-purple-200">
+                            Temperature（温度）
+                            <span className="text-purple-400 ml-1 text-xs">(0.0 - 2.0)</span>
+                          </label>
+                          <span className="text-sm font-semibold min-w-[40px] text-right" style={{ color: "#7c3aed" }}>
+                            {formData?.chatOptions?.temperature?.toFixed(1)}
                           </span>
-                        </label>
-                        <span className="text-sm font-medium text-gray-700 min-w-[40px] text-right">
-                          {formData?.chatOptions?.temperature?.toFixed(1)}
-                        </span>
+                        </div>
+                        <Slider
+                          min={0}
+                          max={2}
+                          step={0.1}
+                          value={formData?.chatOptions?.temperature}
+                          onChange={(value) =>
+                            setFormData({
+                              ...formData,
+                              chatOptions: { ...formData.chatOptions, temperature: value },
+                            })
+                          }
+                        />
                       </div>
-                      <Slider
-                        min={0}
-                        max={2}
-                        step={0.1}
-                        value={formData?.chatOptions?.temperature}
-                        onChange={(value) =>
-                          setFormData({
-                            ...formData,
-                            chatOptions: {
-                              ...formData.chatOptions,
-                              temperature: value,
-                            },
-                          })
-                        }
-                      />
-                    </div>
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="block text-sm text-gray-600">
-                          Top P（核采样）
-                          <span className="text-gray-400 ml-1 text-xs">
-                            (0.0 - 1.0)
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm text-purple-200">
+                            Top P（核采样）
+                            <span className="text-purple-400 ml-1 text-xs">(0.0 - 1.0)</span>
+                          </label>
+                          <span className="text-sm font-semibold min-w-[40px] text-right" style={{ color: "#7c3aed" }}>
+                            {formData?.chatOptions?.topP?.toFixed(1)}
                           </span>
-                        </label>
-                        <span className="text-sm font-medium text-gray-700 min-w-[40px] text-right">
-                          {formData?.chatOptions?.topP?.toFixed(1)}
-                        </span>
+                        </div>
+                        <Slider
+                          min={0}
+                          max={1}
+                          step={0.1}
+                          value={formData?.chatOptions?.topP}
+                          onChange={(value) =>
+                            setFormData({
+                              ...formData,
+                              chatOptions: { ...formData.chatOptions, topP: value },
+                            })
+                          }
+                        />
                       </div>
-                      <Slider
-                        min={0}
-                        max={1}
-                        step={0.1}
-                        value={formData?.chatOptions?.topP}
-                        onChange={(value) =>
-                          setFormData({
-                            ...formData,
-                            chatOptions: {
-                              ...formData.chatOptions,
-                              topP: value,
-                            },
-                          })
-                        }
-                      />
-                    </div>
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="block text-sm text-gray-600">
-                          消息窗口长度
-                          <span className="text-gray-400 ml-1 text-xs">
-                            (1 - 100)
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm text-purple-200">
+                            消息窗口长度
+                            <span className="text-purple-400 ml-1 text-xs">(1 - 100)</span>
+                          </label>
+                          <span className="text-sm font-semibold min-w-[40px] text-right" style={{ color: "#7c3aed" }}>
+                            {formData?.chatOptions?.messageLength}
                           </span>
-                        </label>
-                        <span className="text-sm font-medium text-gray-700 min-w-[40px] text-right">
-                          {formData?.chatOptions?.messageLength}
-                        </span>
+                        </div>
+                        <Slider
+                          min={1}
+                          max={100}
+                          step={1}
+                          value={formData?.chatOptions?.messageLength}
+                          onChange={(value) =>
+                            setFormData({
+                              ...formData,
+                              chatOptions: { ...formData.chatOptions, messageLength: value },
+                            })
+                          }
+                        />
                       </div>
-                      <Slider
-                        min={1}
-                        max={100}
-                        step={1}
-                        value={formData?.chatOptions?.messageLength}
-                        onChange={(value) =>
-                          setFormData({
-                            ...formData,
-                            chatOptions: {
-                              ...formData.chatOptions,
-                              messageLength: value,
-                            },
-                          })
-                        }
-                      />
                     </div>
                   </div>
-                </div>
-              </div>
-            )}
+                </motion.div>
+              )}
 
-            {selectedKey === "knowledge" && (
-              <div>
-                <div className="mb-4">
-                  <label className="block text-gray-700 font-medium mb-3">
-                    知识库
-                  </label>
-                  <p className="text-sm text-gray-500 mb-4">
-                    选择智能体可以访问的知识库，支持多选（最多10个）
-                  </p>
-                  {knowledgeBases.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      <p>暂无知识库，请先创建知识库</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {knowledgeBases.map((kb) => {
-                        const kbId = kb.knowledgeBaseId;
-                        const isSelected = formData.allowedKbs?.includes(kbId);
-                        return (
-                          <div
-                            key={kbId}
-                            className={`border rounded-lg p-4 cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50 ${
-                              isSelected
-                                ? "border-blue-500 bg-blue-50"
-                                : "border-gray-200"
-                            }`}
-                            onClick={() => {
-                              const currentKbs = formData.allowedKbs || [];
-                              if (isSelected) {
-                                setFormData({
-                                  ...formData,
-                                  allowedKbs: currentKbs.filter(
-                                    (k) => k !== kbId,
-                                  ),
-                                });
-                              } else {
-                                if (currentKbs.length >= 10) {
-                                  return; // 最多选择10个
+              {selectedKey === "knowledge" && (
+                <motion.div key="knowledge" {...panelVariants}>
+                  <div className="mb-4">
+                    <label className={labelStyle} style={labelColor}>知识库</label>
+                    <p className="text-sm text-purple-300 mb-4">
+                      选择智能体可以访问的知识库，支持多选（最多10个）
+                    </p>
+                    {knowledgeBases.length === 0 ? (
+                      <div className="text-center py-8 text-purple-400">
+                        <p>暂无知识库，请先创建知识库</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {knowledgeBases.map((kb) => {
+                          const kbId = kb.knowledgeBaseId;
+                          const isSelected = formData.allowedKbs?.includes(kbId);
+                          return (
+                            <div
+                              key={kbId}
+                              className="border rounded-xl p-4 cursor-pointer transition-all duration-200"
+                              style={{
+                                background: isSelected ? "rgba(147, 51, 234, 0.2)" : "rgba(30, 20, 50, 0.5)",
+                                borderColor: isSelected ? "rgba(147, 51, 234, 0.5)" : "rgba(100, 80, 150, 0.3)",
+                                backdropFilter: "blur(12px)",
+                              }}
+                              onClick={() => {
+                                const currentKbs = formData.allowedKbs || [];
+                                if (isSelected) {
+                                  setFormData({
+                                    ...formData,
+                                    allowedKbs: currentKbs.filter((k) => k !== kbId),
+                                  });
+                                } else {
+                                  if (currentKbs.length >= 10) return;
+                                  setFormData({
+                                    ...formData,
+                                    allowedKbs: [...currentKbs, kbId],
+                                  });
                                 }
-                                setFormData({
-                                  ...formData,
-                                  allowedKbs: [...currentKbs, kbId],
-                                });
-                              }
-                            }}
-                          >
-                            <div className="flex items-start gap-2">
-                              <Checkbox
-                                checked={isSelected}
-                                onChange={(e) => {
-                                  e.stopPropagation();
-                                  const currentKbs = formData.allowedKbs || [];
-                                  if (e.target.checked) {
-                                    if (currentKbs.length >= 10) {
-                                      return; // 最多选择10个
+                              }}
+                            >
+                              <div className="flex items-start gap-2">
+                                <Checkbox
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    const currentKbs = formData.allowedKbs || [];
+                                    if (e.target.checked) {
+                                      if (currentKbs.length >= 10) return;
+                                      setFormData({
+                                        ...formData,
+                                        allowedKbs: [...currentKbs, kbId],
+                                      });
+                                    } else {
+                                      setFormData({
+                                        ...formData,
+                                        allowedKbs: currentKbs.filter((k) => k !== kbId),
+                                      });
                                     }
-                                    setFormData({
-                                      ...formData,
-                                      allowedKbs: [...currentKbs, kbId],
-                                    });
-                                  } else {
-                                    setFormData({
-                                      ...formData,
-                                      allowedKbs: currentKbs.filter(
-                                        (k) => k !== kbId,
-                                      ),
-                                    });
-                                  }
-                                }}
-                                className="mr-3"
-                              />
-                              <div className="flex-1">
-                                <div className="flex items-center mb-1">
-                                  <span className="font-medium text-gray-900">
-                                    {kb.name}
-                                  </span>
+                                  }}
+                                  className="mr-3"
+                                />
+                                <div className="flex-1">
+                                  <div className="flex items-center mb-1">
+                                    <span className="font-semibold text-purple-100">{kb.name}</span>
+                                  </div>
+                                  {kb.description && (
+                                    <p className="text-sm text-purple-300">{kb.description}</p>
+                                  )}
                                 </div>
-                                {kb.description && (
-                                  <p className="text-sm text-gray-600">
-                                    {kb.description}
-                                  </p>
-                                )}
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className={labelStyle} style={labelColor}>检索设置</label>
+                    <p className="text-sm text-purple-300 mb-4">配置知识库检索的行为参数</p>
+                    <div className="space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm text-purple-200">
+                            检索数量（Top-K）
+                            <span className="text-purple-400 ml-1 text-xs">(1 - 20)</span>
+                          </label>
+                          <span className="text-sm font-semibold min-w-[40px] text-right" style={{ color: "#7c3aed" }}>
+                            {formData?.ragConfig?.topK ?? 10}
+                          </span>
+                        </div>
+                        <Slider
+                          min={1}
+                          max={20}
+                          step={1}
+                          value={formData?.ragConfig?.topK ?? 10}
+                          onChange={(value) =>
+                            setFormData({
+                              ...formData,
+                              ragConfig: { ...formData.ragConfig, topK: value },
+                            })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-purple-200 mb-2">检索模式</label>
+                        <Select<RagMode>
+                          options={[
+                            { value: "vector", label: "纯向量检索" },
+                            { value: "hybrid", label: "混合检索（向量 + BM25）" },
+                            { value: "hybrid-rerank", label: "混合检索 + Rerank" },
+                          ]}
+                          style={{ width: "100%" }}
+                          value={formData?.ragConfig?.mode ?? "hybrid-rerank"}
+                          onChange={(value: RagMode) =>
+                            setFormData({
+                              ...formData,
+                              ragConfig: { ...formData.ragConfig, mode: value },
+                            })
+                          }
+                        />
+                        <p className="text-xs text-purple-400 mt-2">
+                          {formData?.ragConfig?.mode === "vector" &&
+                            "仅使用向量相似度检索，速度快但可能遗漏关键词匹配"}
+                          {formData?.ragConfig?.mode === "hybrid" &&
+                            "向量检索 + BM25 全文检索通过 RRF 融合，兼顾语义和关键词"}
+                          {(formData?.ragConfig?.mode === "hybrid-rerank" ||
+                            !formData?.ragConfig?.mode) &&
+                            "混合检索后再通过 Cross-Encoder 重排序，命中率最高但速度较慢"}
+                        </p>
+                      </div>
                     </div>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-gray-700 font-medium mb-1">
-                    检索设置
-                  </label>
-                </div>
-              </div>
-            )}
-            {selectedKey === "tools" && (
-              <div>
-                <div className="mb-4">
-                  <label className="block text-gray-700 font-medium mb-3">
-                    工具调用
-                  </label>
-                  <p className="text-sm text-gray-500 mb-4">
-                    选择智能体可以使用的工具，支持多选
-                  </p>
-                  {tools.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      <p>暂无可用工具</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {tools.map((tool) => {
-                        const toolId = tool.name;
-                        const isSelected =
-                          formData.allowedTools?.includes(toolId);
-                        return (
-                          <div
-                            key={toolId}
-                            className={`border rounded-lg p-4 cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50 ${
-                              isSelected
-                                ? "border-blue-500 bg-blue-50"
-                                : "border-gray-200"
-                            }`}
-                            onClick={() => {
-                              const currentTools = formData.allowedTools || [];
-                              if (isSelected) {
-                                setFormData({
-                                  ...formData,
-                                  allowedTools: currentTools.filter(
-                                    (t) => t !== toolId,
-                                  ),
-                                });
-                              } else {
-                                setFormData({
-                                  ...formData,
-                                  allowedTools: [...currentTools, toolId],
-                                });
-                              }
-                            }}
-                          >
-                            <div className="flex items-start gap-2">
-                              <Checkbox
-                                checked={isSelected}
-                                onChange={(e) => {
-                                  e.stopPropagation();
-                                  const currentTools =
-                                    formData.allowedTools || [];
-                                  if (e.target.checked) {
-                                    setFormData({
-                                      ...formData,
-                                      allowedTools: [...currentTools, toolId],
-                                    });
-                                  } else {
-                                    setFormData({
-                                      ...formData,
-                                      allowedTools: currentTools.filter(
-                                        (t) => t !== toolId,
-                                      ),
-                                    });
-                                  }
-                                }}
-                                className="mr-3"
-                              />
-                              <div className="flex-1">
-                                <div className="flex items-center mb-1">
-                                  <span className="font-medium text-gray-900">
-                                    {tool.name}
-                                  </span>
+                  </div>
+                </motion.div>
+              )}
+              {selectedKey === "tools" && (
+                <motion.div key="tools" {...panelVariants}>
+                  <div className="mb-4">
+                    <label className={labelStyle} style={labelColor}>工具调用</label>
+                    <p className="text-sm text-purple-300 mb-4">
+                      选择智能体可以使用的工具，支持多选
+                    </p>
+                    {tools.length === 0 ? (
+                      <div className="text-center py-8 text-purple-400">
+                        <p>暂无可用工具</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {tools.map((tool) => {
+                          const toolId = tool.name;
+                          const isSelected = formData.allowedTools?.includes(toolId);
+                          return (
+                            <div
+                              key={toolId}
+                              className="border rounded-xl p-4 cursor-pointer transition-all duration-200"
+                              style={{
+                                background: isSelected ? "rgba(147, 51, 234, 0.2)" : "rgba(30, 20, 50, 0.5)",
+                                borderColor: isSelected ? "rgba(147, 51, 234, 0.5)" : "rgba(100, 80, 150, 0.3)",
+                                backdropFilter: "blur(12px)",
+                              }}
+                              onClick={() => {
+                                const currentTools = formData.allowedTools || [];
+                                if (isSelected) {
+                                  setFormData({
+                                    ...formData,
+                                    allowedTools: currentTools.filter((t) => t !== toolId),
+                                  });
+                                } else {
+                                  setFormData({
+                                    ...formData,
+                                    allowedTools: [...currentTools, toolId],
+                                  });
+                                }
+                              }}
+                            >
+                              <div className="flex items-start gap-2">
+                                <Checkbox
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    const currentTools = formData.allowedTools || [];
+                                    if (e.target.checked) {
+                                      setFormData({
+                                        ...formData,
+                                        allowedTools: [...currentTools, toolId],
+                                      });
+                                    } else {
+                                      setFormData({
+                                        ...formData,
+                                        allowedTools: currentTools.filter((t) => t !== toolId),
+                                      });
+                                    }
+                                  }}
+                                  className="mr-3"
+                                />
+                                <div className="flex-1">
+                                  <div className="flex items-center mb-1">
+                                    <span className="font-semibold text-purple-100">{tool.name}</span>
+                                  </div>
+                                  <p className="text-sm text-purple-300">{tool.description}</p>
                                 </div>
-                                <p className="text-sm text-gray-600">
-                                  {tool.description}
-                                </p>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-          <div className="flex justify-end px-4 py-3 border-t border-gray-100">
+          <div
+            className="flex justify-end px-5 py-3"
+            style={{ borderTop: "1px solid rgba(168, 85, 247, 0.08)" }}
+          >
             <Button
               type="primary"
               icon={<SaveOutlined />}
               loading={createAgentLoading}
               disabled={!formData.name.trim()}
+              style={{
+                background: "linear-gradient(135deg, #c084fc, #a78bfa)",
+                border: "none",
+                borderRadius: "12px",
+                fontWeight: 600,
+                boxShadow: "0 4px 12px rgba(168, 85, 247, 0.25)",
+              }}
               onClick={async () => {
                 if (!formData.name.trim()) return;
                 setCreateAgentLoading(true);
@@ -516,7 +561,7 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
           </div>
         </div>
       </div>
-    </Modal>
+    </GlassModal>
   );
 };
 

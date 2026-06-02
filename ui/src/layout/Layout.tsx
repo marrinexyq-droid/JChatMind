@@ -1,11 +1,12 @@
-import React from "react";
-
 interface LayoutProps {
   children: React.ReactNode;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children }) => {
-  return <div className="h-screen flex">{children}</div>;
-};
-
-export default Layout;
+export default function Layout({ children }: LayoutProps) {
+  return (
+    <div className="h-screen flex flex-col relative overflow-hidden" style={{ background: "var(--bg-primary)" }}>
+      <div className="mesh-bg" />
+      {children}
+    </div>
+  );
+}

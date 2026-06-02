@@ -4,6 +4,7 @@ import com.kama.jchatmind.converter.ChatMessageConverter;
 import com.kama.jchatmind.message.SseMessage;
 import com.kama.jchatmind.model.dto.ChatMessageDTO;
 import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
+import com.kama.jchatmind.model.request.UpdateChatMessageRequest;
 import com.kama.jchatmind.model.response.CreateChatMessageResponse;
 import com.kama.jchatmind.model.vo.ChatMessageVO;
 import com.kama.jchatmind.service.ChatMessageFacadeService;
@@ -22,6 +23,7 @@ import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -69,7 +71,7 @@ public class JChatMind {
     private static final Integer DEFAULT_MAX_MESSAGES = 20;
 
     // 工具返回结果存入 chatMemory 时的最大字符数，避免大量文本干扰 LLM 决策
-    private static final int MAX_TOOL_RESPONSE_LENGTH = 300;
+    private static final int MAX_TOOL_RESPONSE_LENGTH = 2000;
 
     // SpringAI 自带的 ChatOptions, 不是 AgentDTO.ChatOptions
     private ChatOptions chatOptions;
@@ -222,8 +224,7 @@ public class JChatMind {
                 - 其他 → 直接回答
 
                 【重要规则】
-                1. 如果工具结果已存在于对话中，直接用结果回答，不要再调工具
-                2. 不参考旧对话，只看本轮最新上下文
+                如果工具结果已存在于对话中，直接用结果回答，不要再调工具
 
                 知识库：%s
                 """.formatted(this.availableKbs);
@@ -232,19 +233,11 @@ public class JChatMind {
                 ? this.systemPrompt + "\n\n---\n\n" + thinkToolRules
                 : thinkToolRules;
 
-        // 取最后一条用户消息及之后的所有消息（包含工具返回结果）
-        // 这样 LLM 在下一轮能看到工具返回，避免循环调用
-        List<Message> fullHistory = this.chatMemory.get(this.chatSessionId);
-        List<Message> thinkMessages = new ArrayList<>();
-        int lastUserIdx = -1;
-        for (int i = fullHistory.size() - 1; i >= 0; i--) {
-            if (fullHistory.get(i) instanceof UserMessage) {
-                lastUserIdx = i;
-                break;
-            }
-        }
-        if (lastUserIdx >= 0) {
-            thinkMessages.addAll(fullHistory.subList(lastUserIdx, fullHistory.size()));
+        // 使用 chatMemory 中的全部消息，让 LLM 能关联多轮对话上下文
+        // execute() 中已通过 clear+add 原子替换管理 agent loop 内的消息生命周期
+        List<Message> thinkMessages = this.chatMemory.get(this.chatSessionId);
+        if (thinkMessages == null || thinkMessages.isEmpty()) {
+            thinkMessages = List.of();
         }
 
         Prompt prompt = Prompt.builder()
@@ -252,28 +245,116 @@ public class JChatMind {
                 .messages(thinkMessages)
                 .build();
 
-        this.lastChatResponse = this.chatClient
+        // 预建空消息，获取 chatMessageId 用于流式追加
+        // 注意：使用 createChatMessage(ChatMessageDTO) 而非 (CreateChatMessageRequest)，不触发 ChatEvent。
+        // 流式模式下实时内容通过 SSE 推送，不需要 ChatEvent 驱动前端渲染。
+        ChatMessageDTO preMsg = ChatMessageDTO.builder()
+                .role(ChatMessageDTO.RoleType.ASSISTANT)
+                .content("")
+                .sessionId(this.chatSessionId)
+                .metadata(ChatMessageDTO.MetaData.builder()
+                        .toolCalls(List.of())
+                        .build())
+                .build();
+        String chatMessageId = chatMessageFacadeService.createChatMessage(preMsg)
+                .getChatMessageId();
+
+        // 流式调用 LLM：缓冲 chunks，流结束后一次性持久化，减少 DB 写入次数
+        List<String> chunks = new ArrayList<>();
+
+        Flux<ChatResponse> flux = this.chatClient
                 .prompt(prompt)
                 .system(thinkPrompt)
                 .toolCallbacks(this.availableTools.toArray(new ToolCallback[0]))
-                .call()
-                .chatClientResponse()
+                .stream()
                 .chatResponse();
 
+        try {
+            this.lastChatResponse = flux
+                    .doOnNext(response -> {
+                        String delta = response.getResult().getOutput().getText();
+                        if (delta != null && !delta.isEmpty()) {
+                            chunks.add(delta);
+                            streamChunk(chatMessageId, delta, false);
+                        }
+                    })
+                    .doOnComplete(() -> streamChunk(chatMessageId, "", true))
+                    .blockLast();
+        } catch (Exception e) {
+            // 流式异常时清理已创建的空消息，避免留下孤儿记录
+            log.error("流式调用失败，清理预创建消息: chatMessageId={}", chatMessageId, e);
+            try {
+                chatMessageFacadeService.deleteChatMessage(chatMessageId);
+            } catch (Exception ignored) {
+            }
+            return false;
+        }
+
         Assert.notNull(lastChatResponse, "Last chat client response cannot be null");
+
+        // 流结束后一次性持久化完整内容
+        if (!chunks.isEmpty()) {
+            chatMessageFacadeService.appendChatMessage(chatMessageId, String.join("", chunks));
+        }
 
         var result = this.lastChatResponse.getResult();
         Assert.notNull(result, "Chat response result cannot be null");
         AssistantMessage output = result.getOutput();
 
         List<AssistantMessage.ToolCall> toolCalls = output.getToolCalls();
+        if (toolCalls == null) {
+            toolCalls = List.of();
+        }
 
-        saveMessage(output);
-        refreshPendingMessages();
+        // 流完成后更新消息 metadata（工具调用信息），并通过 SSE 通知前端
+        if (!toolCalls.isEmpty()) {
+            UpdateChatMessageRequest updateReq = new UpdateChatMessageRequest();
+            updateReq.setMetadata(ChatMessageDTO.MetaData.builder()
+                    .toolCalls(toolCalls)
+                    .build());
+            chatMessageFacadeService.updateChatMessage(chatMessageId, updateReq);
+
+            // 发送 SSE 事件通知前端消息已更新（含工具调用信息）
+            SseMessage metaUpdateMsg = SseMessage.builder()
+                    .type(SseMessage.Type.AI_GENERATED_CONTENT)
+                    .payload(SseMessage.Payload.builder()
+                            .message(ChatMessageVO.builder()
+                                    .id(chatMessageId)
+                                    .sessionId(this.chatSessionId)
+                                    .role(ChatMessageDTO.RoleType.ASSISTANT)
+                                    .content(output.getText())
+                                    .build())
+                            .build())
+                    .metadata(SseMessage.Metadata.builder()
+                            .chatMessageId(chatMessageId)
+                            .build())
+                    .build();
+            sseService.send(this.chatSessionId, metaUpdateMsg);
+        }
 
         logToolCalls(toolCalls);
 
         return !toolCalls.isEmpty();
+    }
+
+    private void streamChunk(String chatMessageId, String content, boolean done) {
+        ChatMessageVO vo = ChatMessageVO.builder()
+                .id(chatMessageId)
+                .sessionId(this.chatSessionId)
+                .role(ChatMessageDTO.RoleType.ASSISTANT)
+                .content(content)
+                .build();
+        SseMessage sseMsg = SseMessage.builder()
+                .type(SseMessage.Type.AI_STREAMING_CHUNK)
+                .payload(SseMessage.Payload.builder()
+                        .message(vo)
+                        .done(done)
+                        .build())
+                .metadata(SseMessage.Metadata.builder()
+                        .chatMessageId(chatMessageId)
+                        .build())
+                .build();
+        sseService.send(this.chatSessionId, sseMsg);
     }
 
     // 执行
@@ -345,6 +426,8 @@ public class JChatMind {
             execute();
         } else { // 没有工具调用
             agentState = AgentState.FINISHED;
+            // 确保 pending 消息在结束前全部发送给前端
+            refreshPendingMessages();
         }
     }
 

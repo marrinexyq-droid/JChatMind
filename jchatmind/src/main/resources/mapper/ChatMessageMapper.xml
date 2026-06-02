@@ -106,4 +106,12 @@
         </set>
         WHERE id = CAST(#{id} AS uuid)
     </update>
+
+    <!-- 原子追加内容，避免 read-modify-write 竞态 -->
+    <update id="appendContent">
+        UPDATE chat_message
+        SET content = COALESCE(content, '') || #{appendContent},
+            updated_at = NOW()
+        WHERE id = CAST(#{id} AS uuid)
+    </update>
 </mapper>

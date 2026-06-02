@@ -2,6 +2,7 @@ package com.kama.jchatmind.mapper;
 
 import com.kama.jchatmind.model.entity.ChatMessage;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
@@ -24,4 +25,7 @@ public interface ChatMessageMapper {
     int deleteById(String id);
 
     int updateById(ChatMessage chatMessage);
+
+    /** 原子追加内容，避免 read-modify-write 竞态 */
+    int appendContent(@Param("id") String id, @Param("appendContent") String appendContent);
 }

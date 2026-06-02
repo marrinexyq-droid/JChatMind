@@ -22,8 +22,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -39,6 +42,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     private final DocumentConverter documentConverter;
     private final DocumentStorageService documentStorageService;
     private final MarkdownParserService markdownParserService;
+    private final GeminiDocParser geminiDocParser;
     private final RagService ragService;
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
 
@@ -210,9 +214,25 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
 
             // 从保存的文件路径读取文件
             Path path = documentStorageService.getFilePath(filePath);
+
+            // 检测是否为 Gemini 格式（含 ====== 父切片 标记）
+            boolean isGeminiFormat = false;
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(Files.newInputStream(path), StandardCharsets.UTF_8))) {
+                String firstLines = reader.lines().limit(3)
+                        .filter(l -> l.contains("======") && l.contains("父切片"))
+                        .findFirst().orElse(null);
+                isGeminiFormat = firstLines != null;
+            }
+
+            List<MarkdownParserService.MarkdownSection> sections;
             try (InputStream inputStream = Files.newInputStream(path)) {
-                // 解析 Markdown 文件
-                List<MarkdownParserService.MarkdownSection> sections = markdownParserService.parseMarkdown(inputStream);
+                if (isGeminiFormat) {
+                    log.info("检测到 Gemini 格式文档，使用 GeminiDocParser: {}", filePath);
+                    sections = geminiDocParser.parseGeminiFormat(inputStream);
+                } else {
+                    sections = markdownParserService.parseMarkdown(inputStream);
+                }
 
                 System.out.println(sections);
 
@@ -233,8 +253,13 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
                         continue;
                     }
 
-                    // 对标题进行 embedding
-                    float[] embedding = ragService.embed(title);
+                    // 对标题+正文进行 embedding（而非仅标题），提升检索命中率
+                    // 截断到 2000 字符避免超长内容导致 embedding 超时
+                    String body = content != null && !content.trim().isEmpty()
+                            ? content.substring(0, Math.min(content.length(), 2000))
+                            : "";
+                    String embeddingText = body.isEmpty() ? title : title + "\n" + body;
+                    float[] embedding = ragService.embed(embeddingText);
 
                     // 创建 ChunkBgeM3 实体
                     ChunkBgeM3 chunk = ChunkBgeM3.builder()

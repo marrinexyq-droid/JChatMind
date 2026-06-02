@@ -98,4 +98,44 @@
         LIMIT #{limit}
         ]]>
     </select>
+
+    <!-- BM25 全文检索 -->
+    <select id="bm25Search" resultMap="BaseResultMap">
+        <![CDATA[
+        SELECT id,
+               kb_id,
+               doc_id,
+               content,
+               metadata,
+               embedding,
+               created_at,
+               updated_at,
+               ts_rank_cd(content_tsv, websearch_to_tsquery('simple', #{query})) AS bm25_score
+        FROM chunk_bge_m3
+        WHERE kb_id = CAST(#{kbId} AS uuid)
+          AND content_tsv @@ websearch_to_tsquery('simple', #{query})
+        ORDER BY bm25_score DESC
+        LIMIT #{limit}
+        ]]>
+    </select>
+
+    <!-- 初始化：添加 content_tsv 列（Generated Column） -->
+    <update id="ensureTsvColumn">
+        ALTER TABLE chunk_bge_m3
+        ADD COLUMN IF NOT EXISTS content_tsv tsvector
+        GENERATED ALWAYS AS (to_tsvector('simple', COALESCE(content, ''))) STORED
+    </update>
+
+    <!-- 初始化：创建 GIN 索引用于 BM25 -->
+    <update id="ensureTsvIndex">
+        CREATE INDEX IF NOT EXISTS idx_chunk_content_tsv
+        ON chunk_bge_m3 USING gin(content_tsv)
+    </update>
+
+    <!-- 初始化：创建 HNSW 向量索引（CONCURRENTLY 不阻塞表读写） -->
+    <update id="ensureHnswIndex">
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chunk_embedding_hnsw
+        ON chunk_bge_m3 USING hnsw (embedding vector_l2_ops)
+        WITH (m = 16, ef_construction = 64)
+    </update>
 </mapper>

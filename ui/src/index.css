@@ -1,33 +1,319 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Poppins:wght@300;400;500;600&display=swap');
 @import "tailwindcss";
 
-/* 修复 Ant Design Tabs 在 flex 布局中的滚动问题 */
-.ant-tabs {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+/* ===== CSS Variables: Cyberpunk Glass ===== */
+:root {
+  --bg-deep: #0f0f1e;
+  --bg-card: #1a1a2e;
+  --bg-hover: rgba(26, 26, 46, 0.7);
+
+  --glass-bg: rgba(26, 26, 46, 0.7);
+  --glass-bg-light: rgba(26, 26, 46, 0.5);
+  --glass-border: rgba(165, 180, 252, 0.2);
+  --glass-blur: 10px;
+
+  --color-primary: #6366f1;
+  --color-accent: #06b6d4;
+  --color-primary-rgb: 99, 102, 241;
+  --color-accent-rgb: 6, 182, 212;
+
+  --text-primary: #e0e7ff;
+  --text-secondary: #a5b4fc;
+  --text-muted: #7c7faa;
+
+  --font-display: 'Outfit', 'Poppins', sans-serif;
+  --font-body: 'Poppins', 'Outfit', sans-serif;
+
+  --neon-glow: 0 0 10px rgba(var(--color-primary-rgb), 0.3), inset 0 0 10px rgba(var(--color-primary-rgb), 0.1);
+  --neon-glow-cyan: 0 0 10px rgba(var(--color-accent-rgb), 0.3), inset 0 0 10px rgba(var(--color-accent-rgb), 0.1);
+
+  --shadow-subtle: 0 2px 4px rgba(0, 0, 0, 0.1);
+  --shadow-medium: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --shadow-large: 0 8px 24px rgba(0, 0, 0, 0.2);
+  --shadow-glow: 0 0 20px rgba(var(--color-primary-rgb), 0.3);
 }
 
-.ant-tabs-content-holder {
-  flex: 1;
-  min-height: 0;
+/* ===== Body ===== */
+body {
+  font-family: var(--font-body);
   overflow: hidden;
+  background: var(--bg-deep);
+  color: var(--text-primary);
 }
 
-.ant-tabs-content {
-  height: 100%;
+/* ===== Selection ===== */
+::selection {
+  background: rgba(99, 102, 241, 0.35);
+  color: #ffffff;
 }
 
-.ant-tabs-tabpane {
-  height: 100%;
-  overflow: hidden;
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(165, 180, 252, 0.15);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(165, 180, 252, 0.25); }
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(165, 180, 252, 0.15) transparent;
 }
 
-/* 隐藏滚动条但保持滚动功能 */
-.scrollbar-hide {
-  -ms-overflow-style: none; /* IE and Edge */
-  scrollbar-width: none; /* Firefox */
+/* ===== Hide scrollbar ===== */
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* ===== Glass Effect Classes ===== */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
 }
 
-.scrollbar-hide::-webkit-scrollbar {
-  display: none; /* Chrome, Safari and Opera */
+.glass-light {
+  background: var(--glass-bg-light);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(165, 180, 252, 0.15);
+}
+
+.glass-hover:hover {
+  background: rgba(26, 26, 46, 0.7);
+  border-color: rgba(165, 180, 252, 0.35);
+  box-shadow: var(--neon-glow);
+}
+
+/* ===== Neon Borders ===== */
+.neon-border {
+  border: 2px solid rgba(var(--color-primary-rgb), 0.5);
+  box-shadow: var(--neon-glow);
+}
+
+.neon-border-cyan {
+  border: 2px solid rgba(var(--color-accent-rgb), 0.5);
+  box-shadow: var(--neon-glow-cyan);
+}
+
+/* ===== Text Glow ===== */
+.text-glow {
+  text-shadow: 0 0 10px rgba(var(--color-primary-rgb), 0.5),
+               0 0 20px rgba(var(--color-accent-rgb), 0.3);
+}
+
+/* ===== Gradient Text ===== */
+.gradient-text {
+  background: linear-gradient(135deg, #7c3aed 0%, #6366f1 50%, #06b6d4 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ===== Focus Ring ===== */
+*:focus-visible {
+  outline: 2px dashed #818cf8;
+  outline-offset: 2px;
+}
+
+/* ===== Ambient background ===== */
+.mesh-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(6, 182, 212, 0.05) 100%),
+    #0f0f1e;
+}
+
+/* ===== Animations ===== */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.4), 0 0 40px rgba(6, 182, 212, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(99, 102, 241, 0.6), 0 0 60px rgba(6, 182, 212, 0.3);
+  }
+}
+
+@keyframes float-gentle {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in-scale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pet-particle-float {
+  0% { opacity: 1; transform: translateY(0) scale(0.8) rotate(0deg); }
+  100% { opacity: 0; transform: translateY(-90px) scale(1.3) rotate(15deg); }
+}
+
+/* ===== Ant Design X Sender overrides ===== */
+.ant-sender textarea,
+.ant-sender [contenteditable],
+.ant-sender-input,
+.ant-sender-input::placeholder,
+.ant-sender-input-slot,
+.ant-sender-input textarea {
+  color: var(--text-primary) !important;
+  caret-color: var(--color-primary) !important;
+}
+.ant-sender-input::before,
+.ant-sender [contenteditable]::before {
+  color: var(--text-secondary) !important;
+}
+.ant-sender {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* ===== Ant Design Select ===== */
+.ant-select-selection-item { color: var(--text-primary) !important; }
+.ant-select-selection-placeholder { color: var(--text-secondary) !important; }
+.ant-select-selection-search-input { color: var(--text-primary) !important; }
+.ant-select-dropdown .ant-select-item { color: var(--text-primary) !important; }
+.ant-select-dropdown {
+  background: var(--bg-card) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border) !important;
+}
+.ant-select-dropdown .ant-select-item-option-selected {
+  background: rgba(var(--color-primary-rgb), 0.2) !important;
+}
+.ant-select-dropdown .ant-select-item-option-active {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+.ant-select .ant-select-arrow { color: var(--text-muted) !important; }
+
+/* ===== Ant Design Table ===== */
+.ant-table { background: transparent !important; }
+.ant-table-thead > tr > th {
+  background: var(--bg-card) !important;
+  color: var(--text-secondary) !important;
+  border-bottom: 1px solid var(--glass-border) !important;
+}
+.ant-table-tbody > tr > td {
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  border-bottom: 1px solid rgba(165, 180, 252, 0.08) !important;
+}
+.ant-table-tbody > tr:hover > td { background: rgba(255, 255, 255, 0.04) !important; }
+.ant-pagination-item,
+.ant-pagination-prev .ant-pagination-item-link,
+.ant-pagination-next .ant-pagination-item-link {
+  color: var(--text-primary) !important;
+  background: var(--bg-card) !important;
+  border-color: var(--glass-border) !important;
+}
+.ant-pagination-item-active {
+  background: rgba(var(--color-primary-rgb), 0.2) !important;
+  border-color: var(--color-primary) !important;
+}
+.ant-pagination-item-active a { color: var(--text-primary) !important; }
+
+/* ===== Ant Design Input ===== */
+.ant-input {
+  color: var(--text-primary) !important;
+  background: var(--bg-card) !important;
+  border-color: var(--glass-border) !important;
+}
+.ant-input::placeholder { color: var(--text-secondary) !important; }
+.ant-input-affix-wrapper {
+  background: var(--bg-card) !important;
+  border-color: var(--glass-border) !important;
+}
+
+/* ===== Ant Design Button ===== */
+.ant-btn-default {
+  color: var(--text-primary) !important;
+  background: var(--bg-card) !important;
+  border-color: var(--glass-border) !important;
+}
+.ant-btn-default:hover {
+  color: var(--color-accent) !important;
+  border-color: rgba(var(--color-primary-rgb), 0.4) !important;
+}
+
+/* ===== Ant Design Typography / Empty ===== */
+.ant-typography { color: var(--text-primary) !important; }
+.ant-empty-description { color: var(--text-muted) !important; }
+
+/* ===== Ant Design Popover / Popconfirm ===== */
+.ant-popover-inner,
+.ant-popconfirm .ant-popover-inner {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--glass-border) !important;
+}
+.ant-popconfirm .ant-popover-message-title { color: var(--text-primary) !important; }
+.ant-popconfirm .ant-popover-message-description { color: var(--text-secondary) !important; }
+.ant-popover-title { color: var(--text-primary) !important; }
+.ant-popover-inner-content { color: var(--text-primary) !important; }
+
+/* ===== Ant Design Tooltip ===== */
+.ant-tooltip-inner {
+  background: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--glass-border) !important;
+}
+
+/* ===== Ant Design Message ===== */
+.ant-message-notice-content {
+  background: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ===== Ant Design Modal confirm ===== */
+.ant-modal-confirm-title { color: var(--text-primary) !important; }
+.ant-modal-confirm-content { color: var(--text-secondary) !important; }
+
+/* ===== Ant Design Card ===== */
+.ant-card-head { border-bottom: 1px solid var(--glass-border) !important; }
+.ant-card-head-title { color: var(--text-primary) !important; }
+
+/* ===== Ant Design Checkbox / Radio ===== */
+.ant-checkbox-wrapper, .ant-radio-wrapper { color: var(--text-primary) !important; }
+.ant-checkbox-inner {
+  background: var(--bg-card) !important;
+  border-color: rgba(165, 180, 252, 0.2) !important;
+}
+.ant-checkbox-checked .ant-checkbox-inner {
+  background: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+}
+
+/* ===== Ant Design Divider ===== */
+.ant-divider { border-color: var(--glass-border) !important; }
+.ant-divider-plain .ant-divider-inner-text { color: var(--text-secondary) !important; }
+
+/* ===== Ant Design Slider ===== */
+.ant-slider-rail { background: rgba(255, 255, 255, 0.08) !important; }
+.ant-slider-track { background: var(--color-primary) !important; }
+.ant-slider-handle::after { box-shadow: 0 0 0 2px var(--color-primary) !important; }
+
+/* ===== Ant Design X Bubble ===== */
+.ant-bubble-content { color: var(--text-primary) !important; }
+
+/* ===== Ant Design Tabs flex fix ===== */
+.ant-tabs { display: flex; flex-direction: column; height: 100%; }
+.ant-tabs-content-holder { flex: 1; min-height: 0; overflow: hidden; }
+.ant-tabs-content { height: 100%; }
+.ant-tabs-tabpane { height: 100%; overflow: hidden; }
+
+/* ===== Floating orbs (subtle cyberpunk) ===== */
+.float-orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: -1;
 }

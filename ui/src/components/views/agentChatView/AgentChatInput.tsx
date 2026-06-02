@@ -1,27 +1,28 @@
-import React, { useState } from "react";
 import { Sender } from "@ant-design/x";
 
 interface AgentChatInputProps {
   onSend: (message: string) => void;
 }
 
-const AgentChatInput: React.FC<AgentChatInputProps> = ({ onSend }) => {
-  const [message, setMessage] = useState("");
-
+export default function AgentChatInput({ onSend }: AgentChatInputProps) {
   return (
-    <Sender
-      onSubmit={() => {
-        const trimmed = message.trim();
-        if (trimmed) {
-          onSend(trimmed);
-          setMessage("");
-        }
+    <div
+      className="rounded-pill px-4 py-3"
+      style={{
+        background: "var(--glass-bg)",
+        backdropFilter: "blur(var(--glass-blur))",
+        WebkitBackdropFilter: "blur(var(--glass-blur))",
+        border: "2px solid rgba(99, 102, 241, 0.5)",
+        boxShadow: "var(--neon-glow)",
       }}
-      placeholder="输入消息..."
-      value={message}
-      onChange={setMessage}
-    />
+    >
+      <Sender
+        onSubmit={(value) => {
+          const trimmed = value.trim();
+          if (trimmed) onSend(trimmed);
+        }}
+        placeholder="输入消息..."
+      />
+    </div>
   );
-};
-
-export default AgentChatInput;
+}

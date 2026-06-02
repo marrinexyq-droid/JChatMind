@@ -1,12 +1,6 @@
-import React, { useState, useMemo } from "react";
-import { Card, Space, Typography, Select } from "antd";
-import {
-  BulbOutlined,
-  MessageOutlined,
-  RobotOutlined,
-  DownOutlined,
-} from "@ant-design/icons";
-import { Sender } from "@ant-design/x";
+import { useState, useMemo } from "react";
+import { Select } from "antd";
+import { DownOutlined, SendOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import {
   type AgentVO,
@@ -16,58 +10,101 @@ import {
 import { getAgentEmoji } from "../../../utils";
 import { useChatSessions } from "../../../hooks/useChatSessions.ts";
 
-const { Title, Text } = Typography;
-
-interface DefaultAgentChatViewProps {
+interface EmptyAgentChatViewProps {
   loading: boolean;
   agents: AgentVO[];
 }
 
-const EmptyAgentChatView: React.FC<DefaultAgentChatViewProps> = ({
-  loading,
-  agents,
-}) => {
+const suggestions = [
+  { icon: "💡", text: "解释量子计算的基本原理" },
+  { icon: "🚀", text: "帮我设计一个 REST API 架构" },
+  { icon: "📝", text: "写一篇关于人工智能的博客" },
+  { icon: "🔍", text: "分析这段代码的性能瓶颈" },
+];
+
+export default function EmptyAgentChatView({ loading, agents }: EmptyAgentChatViewProps) {
   const [message, setMessage] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   const navigate = useNavigate();
   const { refreshChatSessions } = useChatSessions();
 
-  // 为每个 agent 生成 emoji
   const agentsWithEmoji = useMemo(() => {
-    return agents.map((agent) => ({
-      ...agent,
-      emoji: getAgentEmoji(agent.id),
-    }));
+    return agents.map((agent) => ({ ...agent, emoji: getAgentEmoji(agent.id) }));
   }, [agents]);
 
-  // 计算实际选中的 agent ID（如果用户没有选择，则使用默认的第一个）
   const effectiveAgentId = useMemo(() => {
-    if (selectedAgentId) {
-      return selectedAgentId;
-    }
+    if (selectedAgentId) return selectedAgentId;
     return agents.length > 0 ? agents[0].id : null;
   }, [selectedAgentId, agents]);
 
+  const handleSend = async () => {
+    if (!effectiveAgentId) return;
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    const response = await createChatSession({
+      agentId: effectiveAgentId,
+      title: trimmed.slice(0, 20),
+    });
+    await createChatMessage({
+      sessionId: response.chatSessionId ?? "",
+      content: trimmed,
+      role: "user",
+      agentId: effectiveAgentId,
+    });
+    await refreshChatSessions();
+    setMessage("");
+    navigate(`/chat/${response.chatSessionId}`);
+  };
+
   return (
-    <div className="flex flex-col h-full">
-      {/* Agent 选择器 - 顶部 */}
-      {agents.length > 0 && (
-        <div className="border-b border-gray-200 bg-white px-4 py-3">
-          <div className="flex items-center justify-start">
+    <div className="flex flex-col items-center h-full overflow-y-auto relative">
+      {/* === Title section === */}
+      <div className="mt-[120px] text-center animate-fade-in-up">
+        <h1
+          className="text-glow mb-4"
+          style={{
+            fontSize: "clamp(40px, 5vw, 56px)",
+            fontWeight: 800,
+            fontFamily: "var(--font-display)",
+            color: "var(--text-primary)",
+            lineHeight: 1.2,
+          }}
+        >
+          有什么新想法吗？
+        </h1>
+        <p style={{ fontSize: "16px", fontFamily: "var(--font-body)", color: "var(--text-secondary)" }}>
+          选择一个智能助手，开始聊天
+        </p>
+      </div>
+
+      {/* === Model selector + Input === */}
+      <div className="w-full max-w-[800px] px-6 mt-[48px] space-y-[32px] animate-fade-in-scale">
+        {/* Model selector */}
+        {agents.length > 0 && (
+          <div
+            className="flex items-center px-4"
+            style={{
+              height: "56px",
+              background: "var(--glass-bg)",
+              backdropFilter: "blur(var(--glass-blur))",
+              WebkitBackdropFilter: "blur(var(--glass-blur))",
+              border: "2px solid rgba(99, 102, 241, 0.4)",
+              borderRadius: "12px",
+              boxShadow: "var(--neon-glow)",
+            }}
+          >
             <Select
               value={effectiveAgentId}
               onChange={(value) => setSelectedAgentId(value)}
-              style={{ width: 200 }}
-              className="agent-selector"
-              suffixIcon={<DownOutlined className="text-gray-400" />}
-              placeholder="选择智能体助手"
+              style={{ width: "100%" }}
+              variant="borderless"
+              suffixIcon={<DownOutlined style={{ color: "var(--text-secondary)", fontSize: 12 }} />}
+              placeholder="选择智能助手"
               optionRender={(option) => (
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">
-                    {agentsWithEmoji.find((a) => a.id === option.value)?.emoji}
-                  </span>
-                  <span className="text-sm">{option.label}</span>
+                  <span className="text-base">{agentsWithEmoji.find((a) => a.id === option.value)?.emoji}</span>
+                  <span style={{ fontFamily: "var(--font-body)", fontSize: 14 }}>{option.label}</span>
                 </div>
               )}
               options={agentsWithEmoji.map((agent) => ({
@@ -76,113 +113,116 @@ const EmptyAgentChatView: React.FC<DefaultAgentChatViewProps> = ({
               }))}
             />
           </div>
-        </div>
-      )}
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="max-w-2xl w-full space-y-6">
-          <div className="text-center mb-8">
-            <Title level={2} className="mb-2">
-              开始新的对话
-            </Title>
-            <Text type="secondary" className="text-base">
-              选择一个智能体助手开始聊天，或直接发送消息创建新会话
-            </Text>
-          </div>
-          <Space orientation="vertical" size="large" className="w-full">
-            <Card
-              hoverable
-              className="cursor-pointer transition-all hover:shadow-lg"
-            >
-              <Space size="middle">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-400 flex items-center justify-center">
-                  <RobotOutlined className="text-white text-xl" />
-                </div>
-                <div>
-                  <Title level={5} className="mb-1">
-                    智能对话
-                  </Title>
-                  <Text type="secondary">
-                    与 AI 助手进行智能对话，获取帮助和建议
-                  </Text>
-                </div>
-              </Space>
-            </Card>
+        )}
 
-            <Card
-              hoverable
-              className="cursor-pointer transition-all hover:shadow-lg"
-            >
-              <Space size="middle">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-green-400 to-teal-400 flex items-center justify-center">
-                  <BulbOutlined className="text-white text-xl" />
-                </div>
-                <div>
-                  <Title level={5} className="mb-1">
-                    知识问答
-                  </Title>
-                  <Text type="secondary">
-                    基于知识库进行问答，获取准确的信息
-                  </Text>
-                </div>
-              </Space>
-            </Card>
-
-            <Card
-              hoverable
-              className="cursor-pointer transition-all hover:shadow-lg"
-            >
-              <Space size="middle">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-red-400 flex items-center justify-center">
-                  <MessageOutlined className="text-white text-xl" />
-                </div>
-                <div>
-                  <Title level={5} className="mb-1">
-                    快速开始
-                  </Title>
-                  <Text type="secondary">
-                    在下方输入框输入消息，立即开始对话
-                  </Text>
-                </div>
-              </Space>
-            </Card>
-          </Space>
-        </div>
-      </div>
-      <div className="border-t border-gray-200 bg-white">
-        {/* 输入框 */}
-        <div className="px-4 pb-4 pt-4">
-          <Sender
-            onSubmit={async () => {
-              if (!effectiveAgentId) return;
-              console.log("发送消息", message);
-              const response = await createChatSession({
-                agentId: effectiveAgentId,
-                title: message.slice(0, 20),
-              });
-              await createChatMessage({
-                sessionId: response.chatSessionId ?? "",
-                content: message,
-                role: "user",
-                agentId: effectiveAgentId,
-              });
-              // 刷新聊天会话列表
-              await refreshChatSessions();
-              setMessage("");
-              navigate(
-                `/chat/${response.chatSessionId}`,
-              );
-            }}
+        {/* Input bar */}
+        <div
+          className="flex items-center px-5"
+          style={{
+            height: "56px",
+            background: "var(--glass-bg)",
+            backdropFilter: "blur(var(--glass-blur))",
+            WebkitBackdropFilter: "blur(var(--glass-blur))",
+            border: "2px solid rgba(99, 102, 241, 0.5)",
+            borderRadius: "20px",
+            boxShadow: "var(--neon-glow)",
+            transition: "all 0.3s ease-out",
+          }}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = "rgba(99, 102, 241, 0.8)";
+            e.currentTarget.style.boxShadow = "0 0 25px rgba(99, 102, 241, 0.5)";
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = "rgba(99, 102, 241, 0.5)";
+            e.currentTarget.style.boxShadow = "var(--neon-glow)";
+          }}
+        >
+          <input
+            type="text"
             value={message}
-            loading={loading}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
             placeholder="输入消息开始对话..."
-            onChange={(value) => {
-              setMessage(value);
+            className="flex-1 bg-transparent border-none outline-none"
+            style={{
+              fontSize: "16px",
+              fontFamily: "var(--font-body)",
+              color: "var(--text-primary)",
             }}
           />
+          <button
+            onClick={handleSend}
+            disabled={loading || !message.trim()}
+            className="flex items-center justify-center shrink-0 transition-all duration-150"
+            style={{
+              width: "40px",
+              height: "40px",
+              background: message.trim() ? "var(--color-primary)" : "rgba(99, 102, 241, 0.3)",
+              borderRadius: "8px",
+              border: "none",
+              cursor: message.trim() ? "pointer" : "default",
+              opacity: message.trim() ? 1 : 0.5,
+            }}
+            onMouseEnter={(e) => {
+              if (message.trim()) {
+                e.currentTarget.style.opacity = "0.9";
+                e.currentTarget.style.boxShadow = "0 0 15px rgba(99, 102, 241, 0.4)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.opacity = "1";
+              e.currentTarget.style.boxShadow = "none";
+            }}
+          >
+            <SendOutlined style={{ color: "#f0f4ff", fontSize: 16 }} />
+          </button>
         </div>
+
+        {/* Suggestion cards */}
+        <div className="mt-[32px]">
+          <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginBottom: "12px", fontFamily: "var(--font-body)" }}>
+            或者尝试以下建议：
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {suggestions.map((s, i) => (
+              <div
+                key={i}
+                onClick={() => { setMessage(s.text); }}
+                className="flex items-center gap-3 px-4 py-3 cursor-pointer transition-all duration-300"
+                style={{
+                  background: "var(--glass-bg-light)",
+                  backdropFilter: "blur(8px)",
+                  WebkitBackdropFilter: "blur(8px)",
+                  border: "1px solid rgba(165, 180, 252, 0.15)",
+                  borderRadius: "12px",
+                  minHeight: "60px",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(26, 26, 46, 0.7)";
+                  e.currentTarget.style.borderColor = "rgba(99, 102, 241, 0.5)";
+                  e.currentTarget.style.boxShadow = "var(--neon-glow)";
+                  e.currentTarget.style.color = "var(--color-accent)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "var(--glass-bg-light)";
+                  e.currentTarget.style.borderColor = "rgba(165, 180, 252, 0.15)";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              >
+                <span className="text-xl shrink-0">{s.icon}</span>
+                <span style={{ fontSize: "14px", fontFamily: "var(--font-body)", color: "var(--text-primary)" }}>
+                  {s.text}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="mt-auto pb-6 pt-12 text-center" style={{ color: "var(--text-secondary)", fontSize: "12px", fontFamily: "var(--font-body)" }}>
+        由 Anime Agent 驱动 | 梦幻赛博朋克美学
       </div>
     </div>
   );
-};
-
-export default EmptyAgentChatView;
+}

@@ -38,6 +38,7 @@ public class SseMessage {
     // 5. AI 完成
     public enum Type {
         AI_GENERATED_CONTENT,
+        AI_STREAMING_CHUNK,
         AI_PLANNING,
         AI_THINKING,
         AI_EXECUTING,
