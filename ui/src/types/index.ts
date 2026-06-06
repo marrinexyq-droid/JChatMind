@@ -19,9 +19,44 @@ export interface ToolResponse {
   responseData: string;
 }
 
+export interface RagTraceChunk {
+  citationId?: string;
+  id: string;
+  kbId: string;
+  docId: string;
+  documentName?: string;
+  contentPreview: string;
+  metadata?: string;
+  matchedBy?: string[];
+  vectorRank?: number;
+  vectorScore?: number;
+  bm25Rank?: number;
+  bm25Score?: number;
+  rrfRank?: number;
+  rrfScore?: number;
+  rerankRank?: number;
+  rerankScore?: number;
+  finalRank?: number;
+}
+
+export interface RagTrace {
+  query: string;
+  kbId: string;
+  mode: string;
+  topK: number;
+  rerankApplied?: boolean;
+  rerankFallback?: boolean;
+  vectorResults?: RagTraceChunk[];
+  bm25Results?: RagTraceChunk[];
+  rrfResults?: RagTraceChunk[];
+  rerankResults?: RagTraceChunk[];
+  finalChunks?: RagTraceChunk[];
+}
+
 export interface ChatMessageVOMetadata {
   toolCalls?: ToolCall[];
   toolResponse?: ToolResponse;
+  ragTrace?: RagTrace;
   feedback?: "like" | "dislike" | null;
 }
 
@@ -42,8 +77,8 @@ export type SseMessageType =
   | "AI_DONE";
 
 export interface SseMessagePayload {
-  message: ChatMessageVO;
-  statusText: string;
+  message?: ChatMessageVO;
+  statusText?: string;
   done?: boolean;
 }
 
@@ -55,4 +90,43 @@ export interface SseMessage {
   type: SseMessageType;
   payload: SseMessagePayload;
   metadata: SseMessageMetadata;
+}
+
+export type UniverseReasoningState =
+  | "idle"
+  | "planning"
+  | "thinking"
+  | "executing"
+  | "streaming"
+  | "done"
+  | "error";
+
+export interface UniverseTimelineNode {
+  id: string;
+  type: SseMessageType | "USER_MESSAGE" | "ERROR";
+  reasoningState: UniverseReasoningState;
+  label: string;
+  timestamp: number;
+  messageId?: string;
+}
+
+export interface UniversePipelineState {
+  sessionId?: string;
+  lastUserMessage?: string;
+  lastAssistantMessageId?: string;
+  reasoningState: UniverseReasoningState;
+  statusText: string;
+  streamTokenEstimate: number;
+  toolCallCount: number;
+  lastEventAt?: number;
+  timeline: UniverseTimelineNode[];
+}
+
+declare global {
+  interface Window {
+    petActions?: {
+      setThink?: () => void;
+      setExcite?: () => void;
+    };
+  }
 }

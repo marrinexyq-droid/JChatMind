@@ -12,6 +12,7 @@ import {
 import { BASE_URL } from "../../api/http.ts";
 import { useAgents } from "../../hooks/useAgents.tsx";
 import { useChatSessions } from "../../hooks/useChatSessions.ts";
+import { useUniversePipeline } from "../../contexts/UniversePipelineContext.tsx";
 import EmptyAgentChatView from "./agentChatView/EmptyAgentChatView.tsx";
 import type { ChatMessageVO, SseMessage, SseMessageType } from "../../types";
 
@@ -21,6 +22,7 @@ export default function AgentChatView() {
   const [loading, setLoading] = useState(false);
   const { agents } = useAgents();
   const { refreshChatSessions } = useChatSessions();
+  const { publishUserMessage, publishSseMessage, publishError } = useUniversePipeline();
   const [messages, setMessages] = useState<ChatMessageVO[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, "like" | "dislike" | null>>({});
   const [agentId, setAgentId] = useState("");
@@ -45,9 +47,13 @@ export default function AgentChatView() {
       const idx = prev.findIndex((m) => m.id === message.id);
       if (idx >= 0) {
         const updated = [...prev];
+        const incomingContent = message.content || "";
+        const nextContent = incomingContent && !updated[idx].content.endsWith(incomingContent)
+          ? updated[idx].content + incomingContent
+          : updated[idx].content;
         updated[idx] = {
           ...updated[idx],
-          content: updated[idx].content + (message.content || ""),
+          content: nextContent,
           metadata: message.metadata || updated[idx].metadata,
         };
         return updated;
@@ -69,7 +75,8 @@ export default function AgentChatView() {
 
   const handleSendMessage = async (message: string) => {
     if (!message.trim()) return;
-    (window as any).petActions?.setThink?.();
+    window.petActions?.setThink?.();
+    publishUserMessage(chatSessionId, message);
 
     if (!chatSessionId) {
       if (!agentId) {
@@ -124,31 +131,39 @@ export default function AgentChatView() {
     es.onerror = (error) => console.error("SSE error:", error);
 
     es.addEventListener("message", (event) => {
-      const msg = JSON.parse(event.data) as SseMessage;
+      let msg: SseMessage;
+      try {
+        msg = JSON.parse(event.data) as SseMessage;
+      } catch (error) {
+        console.error("SSE parse error:", error);
+        publishError(chatSessionId, "Could not parse pipeline event");
+        return;
+      }
+      publishSseMessage(chatSessionId, msg);
       if (msg.type === "AI_GENERATED_CONTENT") {
-        upsertMessage(msg.payload.message);
+        if (msg.payload.message) upsertMessage(msg.payload.message);
       } else if (msg.type === "AI_STREAMING_CHUNK") {
-        upsertMessage(msg.payload.message);
+        if (msg.payload.message) upsertMessage(msg.payload.message);
         if (msg.payload.done) {
-          (window as any).petActions?.setExcite?.();
+          window.petActions?.setExcite?.();
         }
       } else if (msg.type === "AI_PLANNING") {
         setDisplayAgentStatus(true);
-        setAgentStatusText(msg.payload.statusText);
+        setAgentStatusText(msg.payload.statusText ?? "");
         setAgentStatusType("AI_PLANNING");
       } else if (msg.type === "AI_THINKING") {
         setDisplayAgentStatus(true);
-        setAgentStatusText(msg.payload.statusText);
+        setAgentStatusText(msg.payload.statusText ?? "");
         setAgentStatusType("AI_THINKING");
       } else if (msg.type === "AI_EXECUTING") {
         setDisplayAgentStatus(true);
-        setAgentStatusText(msg.payload.statusText);
+        setAgentStatusText(msg.payload.statusText ?? "");
         setAgentStatusType("AI_EXECUTING");
       } else if (msg.type === "AI_DONE") {
         setDisplayAgentStatus(false);
         setAgentStatusText("");
         setAgentStatusType(undefined);
-        (window as any).petActions?.setExcite?.();
+        window.petActions?.setExcite?.();
       } else {
         throw new Error(`Unknown message type: ${msg.type}`);
       }
@@ -161,7 +176,7 @@ export default function AgentChatView() {
     return () => {
       es.close();
     };
-  }, [chatSessionId]);
+  }, [chatSessionId, publishError, publishSseMessage]);
 
   if (!chatSessionId) {
     return <EmptyAgentChatView agents={agents} loading={loading} />;

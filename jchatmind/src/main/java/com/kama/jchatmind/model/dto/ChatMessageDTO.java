@@ -1,6 +1,7 @@
 package com.kama.jchatmind.model.dto;
 
 import com.fasterxml.jackson.annotation.JsonValue;
+import com.kama.jchatmind.model.vo.RagTrace;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -33,6 +34,7 @@ public class ChatMessageDTO {
     public static class MetaData {
         private ToolResponseMessage.ToolResponse toolResponse;
         private List<AssistantMessage.ToolCall> toolCalls;
+        private RagTrace ragTrace;
     }
 
     @Getter

@@ -1,8 +1,13 @@
 package com.kama.jchatmind.agent.tools;
 
+import com.kama.jchatmind.model.vo.QueryPlan;
+import com.kama.jchatmind.model.vo.RagSearchResult;
 import com.kama.jchatmind.model.vo.ScoredChunk;
+import com.kama.jchatmind.service.QueryPlanner;
 import com.kama.jchatmind.service.RagService;
+import com.kama.jchatmind.service.RagTraceContext;
 import org.springframework.stereotype.Component;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
@@ -11,9 +16,11 @@ import java.util.List;
 public class KnowledgeTools implements Tool {
 
     private final RagService ragService;
+    private final QueryPlanner queryPlanner;
 
-    public KnowledgeTools(RagService ragService) {
+    public KnowledgeTools(RagService ragService, QueryPlanner queryPlanner) {
         this.ragService = ragService;
+        this.queryPlanner = queryPlanner;
     }
 
     @Override
@@ -23,7 +30,7 @@ public class KnowledgeTools implements Tool {
 
     @Override
     public String getDescription() {
-        return "从知识库执行混合检索（向量 + BM25 + Rerank）。输入知识库 ID 和查询文本，返回最相关的知识片段。";
+        return "Search the knowledge base with hybrid retrieval: vector search, BM25, RRF fusion, and rerank.";
     }
 
     @Override
@@ -33,31 +40,45 @@ public class KnowledgeTools implements Tool {
 
     @org.springframework.ai.tool.annotation.Tool(
             name = "KnowledgeTool",
-            description = "从指定知识库中执行混合检索（Hybrid RAG: 向量检索 + BM25全文检索 + Cross-Encoder Rerank）。参数为知识库 ID（kbsId）和查询文本（query），返回与查询最相关的知识片段。"
+            description = "Search a specified knowledge base. Parameters are kbsId, query, and optional context for follow-up questions. Returns retrieved chunks marked as [C1], [C2], etc.; cite those markers in the final answer."
     )
-    public String knowledgeQuery(String kbsId, String query) {
+    public String knowledgeQuery(
+            @ToolParam(description = "Knowledge base ID to search") String kbsId,
+            @ToolParam(description = "User question or search query") String query,
+            @ToolParam(required = false, description = "Previous topic for follow-up questions") String context) {
         if (!StringUtils.hasLength(kbsId) || !StringUtils.hasLength(query)) {
-            return "参数错误：kbsId 和 query 不能为空";
+            return "Invalid parameters: kbsId and query cannot be empty.";
         }
 
-        List<ScoredChunk> results = ragService.hybridSearch(kbsId, query, 5, "hybrid-rerank");
+        QueryPlan queryPlan = queryPlanner.plan(query, context);
+        RagSearchResult searchResult = ragService.hybridSearchWithTrace(kbsId, queryPlan);
+        RagTraceContext.set(searchResult.getTrace());
+        List<ScoredChunk> results = searchResult.getChunks();
 
         if (results == null || results.isEmpty()) {
-            return "未找到相关内容";
+            return "No relevant content found.";
         }
 
         StringBuilder sb = new StringBuilder();
+        sb.append("Use the following retrieved chunks as evidence. ")
+                .append("When answering with information from a chunk, cite the matching marker like [C1].\n\n");
+
         for (int i = 0; i < results.size(); i++) {
             ScoredChunk chunk = results.get(i);
-            sb.append(String.format("[%d] (来源: %s, 相关度: %.4f)\n%s\n",
+            sb.append(String.format("[C%d] (source: %s, score: %.4f, docId: %s)%n%s%n",
                     i + 1,
                     chunk.getSource(),
                     chunk.getScore(),
+                    chunk.getDocId(),
                     chunk.getContent()));
             if (i < results.size() - 1) {
                 sb.append("\n---\n\n");
             }
         }
         return sb.toString();
+    }
+
+    public String knowledgeQuery(String kbsId, String query) {
+        return knowledgeQuery(kbsId, query, null);
     }
 }

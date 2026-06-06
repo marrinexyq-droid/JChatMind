@@ -7,7 +7,9 @@ import com.kama.jchatmind.model.dto.KnowledgeBaseDTO;
 import com.kama.jchatmind.model.request.UpdateChatMessageRequest;
 import com.kama.jchatmind.model.response.CreateChatMessageResponse;
 import com.kama.jchatmind.model.vo.ChatMessageVO;
+import com.kama.jchatmind.model.vo.RagTrace;
 import com.kama.jchatmind.service.ChatMessageFacadeService;
+import com.kama.jchatmind.service.RagTraceContext;
 import com.kama.jchatmind.service.SseService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -85,6 +87,8 @@ public class JChatMind {
 
     // 最后一次的 ChatResponse
     private ChatResponse lastChatResponse;
+
+    private RagTrace lastRagTrace;
 
     // AI 返回的，已经持久化，但是需要 sse 发给前端的消息
     private final List<ChatMessageDTO> pendingChatMessages = new ArrayList<>();
@@ -174,6 +178,7 @@ public class JChatMind {
                     .sessionId(this.chatSessionId)
                     .metadata(ChatMessageDTO.MetaData.builder()
                             .toolCalls(assistantMessage.getToolCalls())
+                            .ragTrace(this.lastRagTrace)
                             .build())
                     .build();
             CreateChatMessageResponse chatMessage = chatMessageFacadeService.createChatMessage(chatMessageDTO);
@@ -182,11 +187,16 @@ public class JChatMind {
         } else if (message instanceof ToolResponseMessage toolResponseMessage) {
             // 持久化 ToolResponseMessage
             for (ToolResponseMessage.ToolResponse toolResponse : toolResponseMessage.getResponses()) {
+                RagTrace ragTrace = "KnowledgeTool".equals(toolResponse.name()) ? RagTraceContext.consume() : null;
+                if (ragTrace != null) {
+                    this.lastRagTrace = ragTrace;
+                }
                 ChatMessageDTO chatMessageDTO = builder.role(ChatMessageDTO.RoleType.TOOL)
                         .content(toolResponse.responseData())
                         .sessionId(this.chatSessionId)
                         .metadata(ChatMessageDTO.MetaData.builder()
                                 .toolResponse(toolResponse)
+                                .ragTrace(ragTrace)
                                 .build())
                         .build();
                 CreateChatMessageResponse chatMessage = chatMessageFacadeService.createChatMessage(chatMessageDTO);
@@ -221,13 +231,15 @@ public class JChatMind {
                 判断意图并选择工具：
                 - 用户问天气 → 调用 queryWeather（参数 city 为城市名，没说城市就问）
                 - 用户查知识库/文档 → 调用 KnowledgeTool
+                - 调用 KnowledgeTool 时传入 kbsId、query；如果是“它/这个/上述/继续/再详细说”等多轮追问，把上一轮明确主题放入 context
                 - 其他 → 直接回答
 
                 【重要规则】
                 如果工具结果已存在于对话中，直接用结果回答，不要再调工具
 
                 知识库：%s
-                """.formatted(this.availableKbs);
+                """.formatted(this.availableKbs)
+                + "\nIf KnowledgeTool returns chunks marked [C1], [C2], etc., cite the relevant marker at the end of each sentence that uses that chunk.\n";
 
         String thinkPrompt = StringUtils.hasLength(this.systemPrompt)
                 ? this.systemPrompt + "\n\n---\n\n" + thinkToolRules
@@ -254,6 +266,7 @@ public class JChatMind {
                 .sessionId(this.chatSessionId)
                 .metadata(ChatMessageDTO.MetaData.builder()
                         .toolCalls(List.of())
+                        .ragTrace(this.lastRagTrace)
                         .build())
                 .build();
         String chatMessageId = chatMessageFacadeService.createChatMessage(preMsg)
@@ -323,6 +336,10 @@ public class JChatMind {
                                     .sessionId(this.chatSessionId)
                                     .role(ChatMessageDTO.RoleType.ASSISTANT)
                                     .content(output.getText())
+                                    .metadata(ChatMessageDTO.MetaData.builder()
+                                            .toolCalls(toolCalls)
+                                            .ragTrace(this.lastRagTrace)
+                                            .build())
                                     .build())
                             .build())
                     .metadata(SseMessage.Metadata.builder()
@@ -343,6 +360,11 @@ public class JChatMind {
                 .sessionId(this.chatSessionId)
                 .role(ChatMessageDTO.RoleType.ASSISTANT)
                 .content(content)
+                .metadata(done && this.lastRagTrace != null
+                        ? ChatMessageDTO.MetaData.builder()
+                        .ragTrace(this.lastRagTrace)
+                        .build()
+                        : null)
                 .build();
         SseMessage sseMsg = SseMessage.builder()
                 .type(SseMessage.Type.AI_STREAMING_CHUNK)

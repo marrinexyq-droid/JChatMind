@@ -37,6 +37,26 @@ JChatMind 实现了完整的 **Hybrid RAG Pipeline**：
 
 ## 更新日志
 
+### 2026-06-06 — RAG Trace、查询规划与前端体验迭代
+
+**后端变更：**
+- `JChatMind` — 明确 Spring AI 使用边界：模型侧使用 `ChatClient.stream()` 获取流式 `ChatResponse`，前端展示仍通过项目自定义 SSE 推送。
+- `KnowledgeTools` — 知识库工具返回带 `[C1]`、`[C2]` 标记的证据片段，便于最终回答引用来源。
+- `RagService` / `RagServiceImpl` — 新增带 Trace 的混合检索结果，记录向量检索、BM25、RRF、Rerank 等阶段信息，方便定位召回错、排序错和生成错。
+- 新增 `QueryPlanner` / `RuleBasedQueryPlanner` — 对用户查询做轻量规划，支持多轮追问时补充上下文。
+- 新增 `RagTraceContext`、`RagTrace`、`RagTraceChunk`、`RagSearchResult`、`QueryPlan`、`QueryType` 等模型，用于检索链路追踪和前端展示。
+- 新增 `KnowledgeToolsTest`、`RuleBasedQueryPlannerTest`，补充知识库工具和查询规划的单元测试。
+
+**前端变更：**
+- `AgentChatView` — 调整 SSE 消息接收和本地消息 upsert 逻辑，避免发送后刷新页面才能看到 AI 回答。
+- 新增 `UniversePipelineContext` — 统一接入用户消息、SSE 事件和错误事件，为前端动效与状态联动提供事件管线。
+- `AgentChatHistory` — 支持展示 RAG Trace / 来源引用等扩展元数据。
+- `PlanetariumScene`、`PlanetariumView`、`data.ts` — 重构行星仪数据和视觉交互，增强聊天过程中的状态反馈。
+- `types/index.ts` — 扩展 SSE、RAG Trace 和前端事件相关类型。
+
+**文档变更：**
+- 更新面试备战资料，补充 Spring AI、RAG、SSE、事务、异常降级、MCP、Prompt 工程和系统设计相关问答。
+
 ### 2026-05-29 — 对话流式输出
 
 **后端变更：**

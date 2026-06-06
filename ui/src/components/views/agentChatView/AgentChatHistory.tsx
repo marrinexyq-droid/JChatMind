@@ -7,8 +7,9 @@ import {
   RobotOutlined,
   DownOutlined,
   RightOutlined,
+  DatabaseOutlined,
 } from "@ant-design/icons";
-import type { ChatMessageVO, SseMessageType, ToolCall, ToolResponse } from "../../../types";
+import type { ChatMessageVO, RagTrace, RagTraceChunk, SseMessageType, ToolCall, ToolResponse } from "../../../types";
 import MessageActions from "./MessageActions";
 
 interface AgentChatHistoryProps {
@@ -118,6 +119,110 @@ const ToolResponseDisplay: React.FC<{ toolResponse: ToolResponse }> = ({ toolRes
   );
 };
 
+const formatScore = (score?: number) => (typeof score === "number" ? score.toFixed(4) : "-");
+
+const getCitationsFromContent = (content: string) => {
+  const matches = content.match(/\[C\d+\]/g) ?? [];
+  return Array.from(new Set(matches.map((item) => item.slice(1, -1))));
+};
+
+const ChunkCard: React.FC<{ chunk: RagTraceChunk; compact?: boolean }> = ({ chunk, compact = false }) => (
+  <div
+    className="rounded-lg p-2 text-xs"
+    style={{ background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.08)" }}
+  >
+    <div className="flex flex-wrap items-center gap-1.5 mb-1">
+      {chunk.citationId && (
+        <span className="font-mono px-1.5 py-0.5 rounded" style={{ background: "rgba(139,156,247,0.14)", color: "var(--accent-blue)" }}>
+          {chunk.citationId}
+        </span>
+      )}
+      <span className="font-medium truncate max-w-[260px]" style={{ color: "var(--text-primary)" }}>
+        {chunk.documentName || chunk.docId}
+      </span>
+      {(chunk.matchedBy ?? []).map((source) => (
+        <span key={source} className="font-mono px-1.5 py-0.5 rounded" style={{ background: "rgba(110,231,183,0.1)", color: "var(--color-accent)" }}>
+          {source}
+        </span>
+      ))}
+    </div>
+    <div className="flex flex-wrap gap-x-3 gap-y-1 mb-1" style={{ color: "var(--text-muted)" }}>
+      {chunk.vectorRank && <span>vector #{chunk.vectorRank} / {formatScore(chunk.vectorScore)}</span>}
+      {chunk.bm25Rank && <span>BM25 #{chunk.bm25Rank} / {formatScore(chunk.bm25Score)}</span>}
+      {chunk.rrfRank && <span>RRF #{chunk.rrfRank} / {formatScore(chunk.rrfScore)}</span>}
+      {chunk.rerankRank && <span>rerank #{chunk.rerankRank} / {formatScore(chunk.rerankScore)}</span>}
+      {chunk.finalRank && <span>final #{chunk.finalRank}</span>}
+    </div>
+    {!compact && (
+      <div className="leading-relaxed line-clamp-3" style={{ color: "var(--text-secondary)" }}>
+        {chunk.contentPreview}
+      </div>
+    )}
+  </div>
+);
+
+const TraceStage: React.FC<{ title: string; chunks?: RagTraceChunk[]; compact?: boolean }> = ({ title, chunks = [], compact }) => {
+  if (!chunks.length) return null;
+  return (
+    <div>
+      <div className="mb-1.5 text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>
+        {title} ({chunks.length})
+      </div>
+      <div className="space-y-1.5">
+        {chunks.slice(0, 8).map((chunk) => (
+          <ChunkCard key={`${title}-${chunk.id}-${chunk.finalRank ?? chunk.rrfRank ?? chunk.rerankRank ?? ""}`} chunk={chunk} compact={compact} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const RagTracePanel: React.FC<{ trace: RagTrace; content?: string }> = ({ trace, content = "" }) => {
+  const [expanded, setExpanded] = useState(false);
+  const cited = getCitationsFromContent(content);
+  const citedChunks = (trace.finalChunks ?? []).filter((chunk) => chunk.citationId && cited.includes(chunk.citationId));
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg transition-colors"
+        style={{
+          background: "rgba(110, 231, 183, 0.06)",
+          border: "1px solid rgba(110, 231, 183, 0.12)",
+          color: "var(--text-secondary)",
+        }}
+      >
+        {expanded ? <DownOutlined /> : <RightOutlined />}
+        <DatabaseOutlined style={{ color: "var(--color-accent)" }} />
+        <span>RAG 证据链</span>
+        <span style={{ color: "var(--text-muted)" }}>
+          {trace.mode} · final {(trace.finalChunks ?? []).length}
+          {trace.rerankFallback ? " · rerank fallback" : ""}
+        </span>
+      </button>
+      {expanded && (
+        <div
+          className="mt-2 ml-4 p-3 rounded-xl space-y-3"
+          style={{ background: "rgba(12, 18, 32, 0.5)", border: "1px solid rgba(255,255,255,0.08)" }}
+        >
+          <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+            query: <span className="font-mono" style={{ color: "var(--text-secondary)" }}>{trace.query}</span>
+          </div>
+          {citedChunks.length > 0 && <TraceStage title="回答引用" chunks={citedChunks} compact />}
+          <div className="grid gap-3 md:grid-cols-2">
+            <TraceStage title="向量召回" chunks={trace.vectorResults} compact />
+            <TraceStage title="BM25 召回" chunks={trace.bm25Results} compact />
+          </div>
+          <TraceStage title="RRF 融合后" chunks={trace.rrfResults} compact />
+          <TraceStage title="Rerank 后" chunks={trace.rerankResults} compact />
+          <TraceStage title="最终送入 LLM" chunks={trace.finalChunks} />
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function AgentChatHistory({
   messages, displayAgentStatus = false, agentStatusText = "",
   agentStatusType, feedbackMap = {}, onFeedback, onRegenerate,
@@ -186,6 +291,9 @@ export default function AgentChatHistory({
               {message.metadata?.toolCalls && message.metadata.toolCalls.length > 0 && (
                 <CollapsibleToolCalls toolCalls={message.metadata.toolCalls} />
               )}
+              {message.metadata?.ragTrace && (
+                <RagTracePanel trace={message.metadata.ragTrace} content={message.content} />
+              )}
               {message.content && <div className="x-markdown"><XMarkdown>{message.content}</XMarkdown></div>}
               {onFeedback && onRegenerate && (
                 <MessageActions
@@ -203,6 +311,9 @@ export default function AgentChatHistory({
             <div className="flex justify-start">
               <div className="max-w-[85%]">
                 <ToolResponseDisplay toolResponse={message.metadata.toolResponse} />
+                {message.metadata.ragTrace && (
+                  <RagTracePanel trace={message.metadata.ragTrace} content={message.content} />
+                )}
               </div>
             </div>
           )}
