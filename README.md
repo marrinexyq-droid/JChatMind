@@ -54,9 +54,6 @@ JChatMind 实现了完整的 **Hybrid RAG Pipeline**：
 - `PlanetariumScene`、`PlanetariumView`、`data.ts` — 重构行星仪数据和视觉交互，增强聊天过程中的状态反馈。
 - `types/index.ts` — 扩展 SSE、RAG Trace 和前端事件相关类型。
 
-**文档变更：**
-- 更新面试备战资料，补充 Spring AI、RAG、SSE、事务、异常降级、MCP、Prompt 工程和系统设计相关问答。
-
 ### 2026-05-29 — 对话流式输出
 
 **后端变更：**
