@@ -46,6 +46,10 @@ export interface RagTrace {
   topK: number;
   rerankApplied?: boolean;
   rerankFallback?: boolean;
+  selfRagApplied?: boolean;
+  selfRagDecision?: string;
+  selfRagReason?: string;
+  selfRagRetryCount?: number;
   vectorResults?: RagTraceChunk[];
   bm25Results?: RagTraceChunk[];
   rrfResults?: RagTraceChunk[];

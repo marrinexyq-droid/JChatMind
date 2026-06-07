@@ -24,6 +24,10 @@ public class RagTrace {
     private Double bm25Weight;
     private Boolean rerankApplied;
     private Boolean rerankFallback;
+    private Boolean selfRagApplied;
+    private String selfRagDecision;
+    private String selfRagReason;
+    private Integer selfRagRetryCount;
     private List<RagTraceChunk> vectorResults;
     private List<RagTraceChunk> bm25Results;
     private List<RagTraceChunk> rrfResults;

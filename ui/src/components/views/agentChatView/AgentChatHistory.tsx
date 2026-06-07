@@ -209,6 +209,16 @@ const RagTracePanel: React.FC<{ trace: RagTrace; content?: string }> = ({ trace,
           <div className="text-xs" style={{ color: "var(--text-muted)" }}>
             query: <span className="font-mono" style={{ color: "var(--text-secondary)" }}>{trace.query}</span>
           </div>
+          {trace.selfRagApplied && (
+            <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+              Self-RAG:{" "}
+              <span className="font-mono" style={{ color: "var(--text-secondary)" }}>
+                {trace.selfRagDecision ?? "UNKNOWN"}
+              </span>
+              <span> · retry {trace.selfRagRetryCount ?? 0}</span>
+              {trace.selfRagReason && <span> · {trace.selfRagReason}</span>}
+            </div>
+          )}
           {citedChunks.length > 0 && <TraceStage title="回答引用" chunks={citedChunks} compact />}
           <div className="grid gap-3 md:grid-cols-2">
             <TraceStage title="向量召回" chunks={trace.vectorResults} compact />

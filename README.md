@@ -24,6 +24,7 @@ JChatMind 实现了完整的 **Hybrid RAG Pipeline**：
                           → BM25 全文检索 (PostgreSQL tsvector)
                           → Reciprocal Rank Fusion (RRF) 融合
                           → Cross-Encoder Rerank (BGE-Reranker-v2-m3)
+                          → Self-RAG 证据质量门控
                           → Top-K 结果 → LLM 生成回答
 ```
 
@@ -32,10 +33,25 @@ JChatMind 实现了完整的 **Hybrid RAG Pipeline**：
 - **混合检索**：pgvector HNSW 向量检索 + PostgreSQL tsvector BM25 全文检索
 - **RRF 融合**：Reciprocal Rank Fusion (k=60) 合并两路检索结果
 - **Cross-Encoder Rerank**：BGE-Reranker-v2-m3 二次精排，显著提升命中率
+- **轻量 Self-RAG**：生成前评估证据充分性，必要时自动切换 Rerank 或扩大候选池重检索
 - **HNSW 索引**：pgvector HNSW 索引 (m=16, ef_construction=64) 加速向量检索
 - **Agent 工具调用**：Spring AI @Tool 注解，LLM 自主决策是否触发知识库检索
 
 ## 更新日志
+
+### 2026-06-07 — 轻量前置 Self-RAG
+
+**后端变更：**
+- 新增 `SelfRagEvaluator` / `RuleBasedSelfRagEvaluator`，在检索后、生成前判断证据是否足够支撑回答。
+- 新增 `SelfRagDecision`、`SelfRagEvaluation`，支持 `ACCEPT`、`RETRY_WITH_RERANK`、`RETRY_WITH_LARGER_POOL`、`INSUFFICIENT_EVIDENCE` 四类决策。
+- `KnowledgeTools` 接入 Self-RAG 质量门控：最多补救检索一次，失败时返回证据不足提示，不改变 `[C1]` 引用协议。
+- `RagTrace` 新增 Self-RAG 决策、原因和重试次数字段，便于排查“召回不足”和“证据不足”问题。
+- `application.yaml` 新增 `rag.self-rag.*` 配置，默认开启轻量规则版 Self-RAG。
+- 新增 `RuleBasedSelfRagEvaluatorTest`，并补充 `KnowledgeToolsTest` 覆盖接受、补救和失败降级路径。
+
+**前端变更：**
+- `AgentChatHistory` 的 RAG Trace 面板展示 Self-RAG 决策、原因和 retry 次数。
+- `types/index.ts` 扩展 `RagTrace` 类型，兼容旧消息 metadata。
 
 ### 2026-06-06 — RAG Trace、查询规划与前端体验迭代
 
