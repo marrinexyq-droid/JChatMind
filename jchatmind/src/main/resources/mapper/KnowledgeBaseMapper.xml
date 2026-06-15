@@ -2,9 +2,9 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.kama.jchatmind.mapper.KnowledgeBaseMapper">
+<mapper namespace="com.marrine.jchatmind.mapper.KnowledgeBaseMapper">
 
-    <resultMap id="BaseResultMap" type="com.kama.jchatmind.model.entity.KnowledgeBase">
+    <resultMap id="BaseResultMap" type="com.marrine.jchatmind.model.entity.KnowledgeBase">
         <id property="id" column="id" jdbcType="VARCHAR"/>
         <result property="name" column="name" jdbcType="VARCHAR"/>
         <result property="description" column="description" jdbcType="VARCHAR"/>
@@ -18,7 +18,7 @@
         metadata,created_at,updated_at
     </sql>
 
-    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.KnowledgeBase"
+    <insert id="insert" parameterType="com.marrine.jchatmind.model.entity.KnowledgeBase"
             keyColumn="id" keyProperty="id" useGeneratedKeys="true">
         INSERT INTO knowledge_base
         (
@@ -81,7 +81,7 @@
         DELETE FROM knowledge_base WHERE id = CAST(#{id} AS uuid)
     </delete>
 
-    <update id="updateById" parameterType="com.kama.jchatmind.model.entity.KnowledgeBase">
+    <update id="updateById" parameterType="com.marrine.jchatmind.model.entity.KnowledgeBase">
         UPDATE knowledge_base
         <set>
             <if test="name != null">

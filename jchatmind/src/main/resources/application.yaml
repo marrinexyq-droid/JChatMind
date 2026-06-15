@@ -33,9 +33,9 @@ spring:
         options:
           model: glm-4.6v
 mybatis:
-  type-aliases-package: com.kama.jchatmind.model.entity
+  type-aliases-package: com.marrine.jchatmind.model.entity
   mapper-locations: classpath:mapper/*.xml
-  type-handlers-package: com.kama.jchatmind.typehandler
+  type-handlers-package: com.marrine.jchatmind.typehandler
 
 document:
   storage:
@@ -49,3 +49,37 @@ rag:
     enabled: true
     min-final-chunks: 2
     max-retries: 1
+  strategy:
+    types:
+      FACT:
+        mode: hybrid
+        top-k: 5
+        candidate-pool-size: 20
+        vector-weight: 1.0
+        bm25-weight: 1.0
+        graph-expansion-enabled: false
+        graph-max-hops: 1
+      SUMMARY:
+        mode: hybrid
+        top-k: 10
+        candidate-pool-size: 40
+        vector-weight: 1.0
+        bm25-weight: 1.0
+        graph-expansion-enabled: false
+        graph-max-hops: 1
+      COMPARISON:
+        mode: hybrid-rerank
+        top-k: 8
+        candidate-pool-size: 30
+        vector-weight: 1.0
+        bm25-weight: 1.2
+        graph-expansion-enabled: false
+        graph-max-hops: 1
+      MULTI_HOP:
+        mode: hybrid-rerank
+        top-k: 8
+        candidate-pool-size: 40
+        vector-weight: 1.0
+        bm25-weight: 1.2
+        graph-expansion-enabled: true
+        graph-max-hops: 2

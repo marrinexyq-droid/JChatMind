@@ -29,7 +29,7 @@ CANDIDATE_POOL_SIZE = int(os.getenv("POOL_SIZE", "20"))
 RRF_K = int(os.getenv("RRF_K", "60"))
 EMBED_MODE = os.getenv("EMBED_MODE", "heading+body")  # "heading+body" | "heading-only"
 TOP_K_LIST = [1, 3, 5, 10]
-EVAL_MODES = ["vector", "hybrid", "hybrid-rerank"]
+EVAL_MODES = ["vector", "hybrid", "hybrid-rerank", "adaptive-rag"]
 
 # ====== 路径 ======
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

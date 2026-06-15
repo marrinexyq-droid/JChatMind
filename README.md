@@ -114,3 +114,59 @@ JChatMind 实现了完整的 **Hybrid RAG Pipeline**：
 ## License
 
 [MIT](LICENSE)
+
+## RAG deep-dive interview notes
+
+This project now treats RAG as the main technical depth line: retrieval is not a
+single vector search call, but an observable and measurable pipeline.
+
+### Adaptive RAG pipeline
+
+```text
+Markdown upload
+  -> heading-aware chunking
+  -> BGE-M3 embedding
+  -> GraphRAG-lite entity/relation indexing
+
+User query
+  -> rule-based query planner
+  -> vector search + BM25
+  -> RRF fusion
+  -> optional GraphRAG-lite 1-2 hop expansion for multi-hop queries
+  -> optional cross-encoder rerank
+  -> context reorder
+  -> Self-RAG evidence gate
+  -> cited answer with [C1], [C2] evidence markers
+```
+
+### Evaluation snapshot
+
+The current evaluation set under `jchatmind/reranker-service/rag_eval` contains
+58 labeled questions over 10 quantum-entanglement documents. The baseline report
+shows why the default router keeps `hybrid` fast and reserves rerank for complex
+queries:
+
+| Mode | Recall@1 | MRR | NDCG@5 | P50 latency |
+|---|---:|---:|---:|---:|
+| vector | 0.8421 | 0.9211 | 0.9417 | 93.7 ms |
+| hybrid | 0.9298 | 0.9649 | 0.9741 | 94.5 ms |
+| hybrid-rerank | 0.9649 | 0.9825 | 0.9871 | 8649.6 ms |
+
+### Engineering tradeoff case
+
+For exact factual questions, `hybrid` is usually the best default: BM25 recovers
+hard terms and model names while vector retrieval covers semantic paraphrases.
+For comparison or multi-hop questions, the planner switches to `hybrid-rerank`;
+multi-hop queries also enable GraphRAG-lite expansion so chunks connected through
+shared entities can enter the candidate pool before rerank. If retrieved evidence
+is sparse, the Self-RAG gate retries with rerank or a larger pool; if evidence is
+still insufficient, the tool returns an explicit insufficient-evidence message
+instead of forcing the model to guess.
+
+### Trace surface
+
+Every RAG tool call records query type, planned query, retrieval mode, candidate
+pool size, vector/BM25/RRF/rerank ranks, GraphRAG-lite expanded chunks, final
+chunks, and Self-RAG decisions. The chat UI exposes this in the RAG evidence
+panel, so a demo can show not only the final answer but also why those evidence
+chunks were selected.

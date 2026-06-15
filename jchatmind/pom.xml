@@ -8,7 +8,7 @@
         <version>3.5.8</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
-    <groupId>com.kama</groupId>
+    <groupId>com.marrine</groupId>
     <artifactId>jchatmind</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>jchatmind</name>

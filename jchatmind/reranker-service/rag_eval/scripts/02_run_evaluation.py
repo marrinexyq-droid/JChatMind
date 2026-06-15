@@ -138,6 +138,75 @@ def rrf_fusion(vec_results, bm25_results):
     return [{**info[cid], "score": scores[cid]} for cid in sorted_ids]
 
 
+def classify_query(query: str) -> str:
+    summary_terms = ["总结", "概括", "梳理", "有哪些", "整体", "要点"]
+    comparison_terms = ["对比", "比较", "区别", "差异", "相同", "不同", "vs", "VS", "优缺点"]
+    multihop_terms = ["为什么", "如何影响", "关系", "原因", "导致", "影响", "关联", "联系"]
+    if any(term in query for term in summary_terms):
+        return "SUMMARY"
+    if any(term in query for term in comparison_terms):
+        return "COMPARISON"
+    if any(term in query for term in multihop_terms) or query.count("，") + query.count(",") >= 2:
+        return "MULTI_HOP"
+    return "FACT"
+
+
+def graph_tables_ready(conn) -> bool:
+    cur = conn.cursor()
+    cur.execute("SELECT to_regclass('public.chunk_entity_mention'), to_regclass('public.entity_relation')")
+    ready = all(row is not None for row in cur.fetchone())
+    cur.close()
+    return ready
+
+
+def graph_expand(conn, kb_id: str, seed_ids: list[str], max_hops: int, limit: int) -> list[dict]:
+    if not seed_ids or not graph_tables_ready(conn):
+        return []
+    cur = conn.cursor()
+    cur.execute(
+        """
+        WITH RECURSIVE seed_entities AS (
+            SELECT DISTINCT entity_id
+            FROM chunk_entity_mention
+            WHERE kb_id = %s::uuid AND chunk_id = ANY(%s::uuid[])
+        ),
+        related_entities(entity_id, depth) AS (
+            SELECT entity_id, 0 FROM seed_entities
+            UNION
+            SELECT CASE
+                     WHEN er.source_entity_id = re.entity_id THEN er.target_entity_id
+                     ELSE er.source_entity_id
+                   END,
+                   re.depth + 1
+            FROM related_entities re
+            JOIN entity_relation er
+              ON er.kb_id = %s::uuid
+             AND (er.source_entity_id = re.entity_id OR er.target_entity_id = re.entity_id)
+            WHERE re.depth < %s
+        ),
+        related_chunks AS (
+            SELECT cem.chunk_id, MIN(re.depth) AS min_depth, COUNT(*) AS matched_entities
+            FROM related_entities re
+            JOIN chunk_entity_mention cem
+              ON cem.kb_id = %s::uuid AND cem.entity_id = re.entity_id
+            WHERE NOT (cem.chunk_id = ANY(%s::uuid[]))
+            GROUP BY cem.chunk_id
+        )
+        SELECT c.id, c.content
+        FROM related_chunks rc
+        JOIN chunk_bge_m3 c ON c.id = rc.chunk_id
+        WHERE c.kb_id = %s::uuid
+        ORDER BY rc.min_depth ASC, rc.matched_entities DESC, c.updated_at DESC
+        LIMIT %s
+        """,
+        (kb_id, seed_ids, kb_id, max_hops, kb_id, seed_ids, kb_id, limit),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    return [{"id": r[0], "content": r[1], "score": 1.0 / (80 + i + 1), "source": "graph"}
+            for i, r in enumerate(rows)]
+
+
 def rerank(query: str, candidates: list[dict], top_k: int) -> list[dict]:
     docs = [c["content"] for c in candidates]
     resp = requests.post(
@@ -155,6 +224,32 @@ def rerank(query: str, candidates: list[dict], top_k: int) -> list[dict]:
                             "score": item["score"], "source": "rerank"})
     results.sort(key=lambda r: r["score"], reverse=True)
     return results[:top_k]
+
+
+def adaptive_rag(conn, query_text: str, kb_id: str, fused: list[dict]) -> tuple[list[dict], dict]:
+    query_type = classify_query(query_text)
+    if query_type == "FACT":
+        return fused[:10], {"query_type": query_type, "graph_ms": 0, "rerank_ms": 0}
+
+    t0 = time.perf_counter()
+    graph_results = []
+    if query_type == "MULTI_HOP":
+        seed_ids = [str(item["id"]) for item in fused[:8]]
+        graph_results = graph_expand(conn, kb_id, seed_ids, max_hops=2, limit=20)
+    graph_ms = (time.perf_counter() - t0) * 1000
+
+    seen = set()
+    candidates = []
+    for item in fused + graph_results:
+        if item["id"] in seen:
+            continue
+        seen.add(item["id"])
+        candidates.append(item)
+
+    t0 = time.perf_counter()
+    results = rerank(query_text, candidates, 10)
+    rerank_ms = (time.perf_counter() - t0) * 1000
+    return results, {"query_type": query_type, "graph_ms": graph_ms, "rerank_ms": rerank_ms}
 
 
 def run_single_query(conn, query_info: dict, kb_id: str) -> dict:
@@ -195,6 +290,17 @@ def run_single_query(conn, query_info: dict, kb_id: str) -> dict:
                                 "bm25_ms": t_bm25, "rerank_ms": t_rerank,
                                 "total_ms": t_embed + t_vec + t_bm25 + t_rerank}
 
+    # adaptive-rag
+    adaptive_results, adaptive_extra = adaptive_rag(conn, query_text, kb_id, fused)
+    timings["adaptive-rag"] = {"embed_ms": t_embed, "vector_ms": t_vec,
+                               "bm25_ms": t_bm25,
+                               "graph_ms": adaptive_extra["graph_ms"],
+                               "rerank_ms": adaptive_extra["rerank_ms"],
+                               "total_ms": t_embed + t_vec + t_bm25
+                                           + adaptive_extra["graph_ms"]
+                                           + adaptive_extra["rerank_ms"],
+                               "query_type": adaptive_extra["query_type"]}
+
     return {
         "query_id": query_info["query_id"],
         "query": query_text,
@@ -203,6 +309,7 @@ def run_single_query(conn, query_info: dict, kb_id: str) -> dict:
             "vector": vec_top10,
             "hybrid": hybrid_top10,
             "hybrid-rerank": reranked,
+            "adaptive-rag": adaptive_results,
         },
         "timings": timings,
     }

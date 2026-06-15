@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.marrine.jchatmind.mapper.GraphRagMapper">
+
+    <resultMap id="KnowledgeEntityResultMap" type="com.marrine.jchatmind.model.entity.KnowledgeEntity">
+        <id property="id" column="id" jdbcType="VARCHAR"/>
+        <result property="kbId" column="kb_id" jdbcType="VARCHAR"/>
+        <result property="name" column="name" jdbcType="VARCHAR"/>
+        <result property="type" column="type" jdbcType="VARCHAR"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+        <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <resultMap id="ChunkResultMap" type="com.marrine.jchatmind.model.entity.ChunkBgeM3">
+        <id property="id" column="id" jdbcType="VARCHAR"/>
+        <result property="kbId" column="kb_id" jdbcType="VARCHAR"/>
+        <result property="docId" column="doc_id" jdbcType="VARCHAR"/>
+        <result property="content" column="content" jdbcType="VARCHAR"/>
+        <result property="metadata" column="metadata" jdbcType="VARCHAR"/>
+        <result property="embedding" column="embedding" jdbcType="OTHER"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+        <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <update id="ensurePgCryptoExtension">
+        CREATE EXTENSION IF NOT EXISTS pgcrypto
+    </update>
+
+    <update id="ensureKnowledgeEntityTable">
+        CREATE TABLE IF NOT EXISTS knowledge_entity (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            kb_id uuid NOT NULL,
+            name text NOT NULL,
+            type varchar(64) NOT NULL DEFAULT 'TERM',
+            created_at timestamp NOT NULL DEFAULT NOW(),
+            updated_at timestamp NOT NULL DEFAULT NOW(),
+            CONSTRAINT uk_knowledge_entity_kb_name UNIQUE (kb_id, name)
+        )
+    </update>
+
+    <update id="ensureChunkEntityMentionTable">
+        CREATE TABLE IF NOT EXISTS chunk_entity_mention (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            kb_id uuid NOT NULL,
+            doc_id uuid NOT NULL,
+            chunk_id uuid NOT NULL,
+            entity_id uuid NOT NULL,
+            entity_name text NOT NULL,
+            created_at timestamp NOT NULL DEFAULT NOW(),
+            CONSTRAINT uk_chunk_entity_mention UNIQUE (kb_id, chunk_id, entity_id)
+        )
+    </update>
+
+    <update id="ensureEntityRelationTable">
+        CREATE TABLE IF NOT EXISTS entity_relation (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            kb_id uuid NOT NULL,
+            source_entity_id uuid NOT NULL,
+            target_entity_id uuid NOT NULL,
+            relation_type varchar(64) NOT NULL DEFAULT 'CO_OCCURS_WITH',
+            source_chunk_id uuid NOT NULL,
+            doc_id uuid NOT NULL,
+            weight integer NOT NULL DEFAULT 1,
+            created_at timestamp NOT NULL DEFAULT NOW(),
+            updated_at timestamp NOT NULL DEFAULT NOW(),
+            CONSTRAINT uk_entity_relation_chunk UNIQUE
+                (kb_id, source_entity_id, target_entity_id, relation_type, source_chunk_id)
+        )
+    </update>
+
+    <update id="ensureKnowledgeEntityIndexes">
+        CREATE INDEX IF NOT EXISTS idx_knowledge_entity_kb_name
+        ON knowledge_entity (kb_id, name)
+    </update>
+
+    <update id="ensureChunkEntityMentionIndexes">
+        CREATE INDEX IF NOT EXISTS idx_chunk_entity_mention_kb_chunk
+        ON chunk_entity_mention (kb_id, chunk_id)
+    </update>
+
+    <update id="ensureEntityRelationIndexes">
+        CREATE INDEX IF NOT EXISTS idx_entity_relation_kb_source
+        ON entity_relation (kb_id, source_entity_id, target_entity_id)
+    </update>
+
+    <select id="selectEntityByName" resultMap="KnowledgeEntityResultMap">
+        SELECT id, kb_id, name, type, created_at, updated_at
+        FROM knowledge_entity
+        WHERE kb_id = CAST(#{kbId} AS uuid)
+          AND name = #{name}
+        LIMIT 1
+    </select>
+
+    <insert id="insertEntity" parameterType="com.marrine.jchatmind.model.entity.KnowledgeEntity"
+            keyColumn="id" keyProperty="id" useGeneratedKeys="true">
+        INSERT INTO knowledge_entity (kb_id, name, type, created_at, updated_at)
+        VALUES (CAST(#{kbId} AS uuid), #{name}, #{type}, #{createdAt}, #{updatedAt})
+        ON CONFLICT (kb_id, name) DO UPDATE SET updated_at = NOW()
+    </insert>
+
+    <insert id="insertMention" parameterType="com.marrine.jchatmind.model.entity.ChunkEntityMention">
+        INSERT INTO chunk_entity_mention (kb_id, doc_id, chunk_id, entity_id, entity_name, created_at)
+        VALUES (
+            CAST(#{kbId} AS uuid),
+            CAST(#{docId} AS uuid),
+            CAST(#{chunkId} AS uuid),
+            CAST(#{entityId} AS uuid),
+            #{entityName},
+            #{createdAt}
+        )
+        ON CONFLICT (kb_id, chunk_id, entity_id) DO NOTHING
+    </insert>
+
+    <insert id="insertRelation" parameterType="com.marrine.jchatmind.model.entity.EntityRelation">
+        INSERT INTO entity_relation (
+            kb_id, source_entity_id, target_entity_id, relation_type, source_chunk_id, doc_id,
+            weight, created_at, updated_at
+        )
+        VALUES (
+            CAST(#{kbId} AS uuid),
+            CAST(#{sourceEntityId} AS uuid),
+            CAST(#{targetEntityId} AS uuid),
+            #{relationType},
+            CAST(#{sourceChunkId} AS uuid),
+            CAST(#{docId} AS uuid),
+            COALESCE(#{weight}, 1),
+            #{createdAt},
+            #{updatedAt}
+        )
+        ON CONFLICT (kb_id, source_entity_id, target_entity_id, relation_type, source_chunk_id)
+        DO UPDATE SET weight = entity_relation.weight + 1, updated_at = NOW()
+    </insert>
+
+    <delete id="deleteRelationsByDocumentId">
+        DELETE FROM entity_relation WHERE doc_id = CAST(#{docId} AS uuid)
+    </delete>
+
+    <delete id="deleteMentionsByDocumentId">
+        DELETE FROM chunk_entity_mention WHERE doc_id = CAST(#{docId} AS uuid)
+    </delete>
+
+    <select id="expandRelatedChunks" resultMap="ChunkResultMap">
+        <if test="seedChunkIds == null or seedChunkIds.size() == 0">
+            SELECT id, kb_id, doc_id, content, metadata, embedding, created_at, updated_at
+            FROM chunk_bge_m3
+            WHERE 1 = 0
+        </if>
+        <if test="seedChunkIds != null and seedChunkIds.size() > 0">
+            WITH RECURSIVE seed_entities AS (
+                SELECT DISTINCT entity_id
+                FROM chunk_entity_mention
+                WHERE kb_id = CAST(#{kbId} AS uuid)
+                  AND chunk_id IN
+                  <foreach collection="seedChunkIds" item="chunkId" open="(" separator="," close=")">
+                      CAST(#{chunkId} AS uuid)
+                  </foreach>
+            ),
+            related_entities(entity_id, depth) AS (
+                SELECT entity_id, 0 FROM seed_entities
+                UNION
+                SELECT
+                    CASE
+                        WHEN er.source_entity_id = re.entity_id THEN er.target_entity_id
+                        ELSE er.source_entity_id
+                    END AS entity_id,
+                    re.depth + 1
+                FROM related_entities re
+                JOIN entity_relation er
+                  ON er.kb_id = CAST(#{kbId} AS uuid)
+                 AND (er.source_entity_id = re.entity_id OR er.target_entity_id = re.entity_id)
+                WHERE re.depth &lt; #{maxHops}
+            ),
+            related_chunks AS (
+                SELECT
+                    cem.chunk_id,
+                    MIN(re.depth) AS min_depth,
+                    COUNT(*) AS matched_entities
+                FROM related_entities re
+                JOIN chunk_entity_mention cem
+                  ON cem.kb_id = CAST(#{kbId} AS uuid)
+                 AND cem.entity_id = re.entity_id
+                WHERE cem.chunk_id NOT IN
+                  <foreach collection="seedChunkIds" item="chunkId" open="(" separator="," close=")">
+                      CAST(#{chunkId} AS uuid)
+                  </foreach>
+                GROUP BY cem.chunk_id
+            )
+            SELECT c.id, c.kb_id, c.doc_id, c.content, c.metadata, c.embedding, c.created_at, c.updated_at
+            FROM related_chunks rc
+            JOIN chunk_bge_m3 c ON c.id = rc.chunk_id
+            WHERE c.kb_id = CAST(#{kbId} AS uuid)
+            ORDER BY rc.min_depth ASC, rc.matched_entities DESC, c.updated_at DESC
+            LIMIT #{limit}
+        </if>
+    </select>
+</mapper>

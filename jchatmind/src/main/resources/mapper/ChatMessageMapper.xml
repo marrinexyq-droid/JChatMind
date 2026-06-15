@@ -2,9 +2,9 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.kama.jchatmind.mapper.ChatMessageMapper">
+<mapper namespace="com.marrine.jchatmind.mapper.ChatMessageMapper">
 
-    <resultMap id="BaseResultMap" type="com.kama.jchatmind.model.entity.ChatMessage">
+    <resultMap id="BaseResultMap" type="com.marrine.jchatmind.model.entity.ChatMessage">
         <id property="id" column="id" jdbcType="VARCHAR"/>
         <result property="sessionId" column="session_id" jdbcType="VARCHAR"/>
         <result property="role" column="role" jdbcType="VARCHAR"/>
@@ -20,7 +20,7 @@
         updated_at
     </sql>
 
-    <insert id="insert" parameterType="com.kama.jchatmind.model.entity.ChatMessage"
+    <insert id="insert" parameterType="com.marrine.jchatmind.model.entity.ChatMessage"
             keyColumn="id" keyProperty="id" useGeneratedKeys="true">
         INSERT INTO chat_message
         (
@@ -87,7 +87,7 @@
         DELETE FROM chat_message WHERE id = CAST(#{id} AS uuid)
     </delete>
 
-    <update id="updateById" parameterType="com.kama.jchatmind.model.entity.ChatMessage">
+    <update id="updateById" parameterType="com.marrine.jchatmind.model.entity.ChatMessage">
         UPDATE chat_message
         <set>
             <if test="sessionId != null">

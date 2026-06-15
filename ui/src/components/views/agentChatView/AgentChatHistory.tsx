@@ -150,6 +150,7 @@ const ChunkCard: React.FC<{ chunk: RagTraceChunk; compact?: boolean }> = ({ chun
       {chunk.vectorRank && <span>vector #{chunk.vectorRank} / {formatScore(chunk.vectorScore)}</span>}
       {chunk.bm25Rank && <span>BM25 #{chunk.bm25Rank} / {formatScore(chunk.bm25Score)}</span>}
       {chunk.rrfRank && <span>RRF #{chunk.rrfRank} / {formatScore(chunk.rrfScore)}</span>}
+      {chunk.graphRank && <span>graph #{chunk.graphRank} / {formatScore(chunk.graphScore)}</span>}
       {chunk.rerankRank && <span>rerank #{chunk.rerankRank} / {formatScore(chunk.rerankScore)}</span>}
       {chunk.finalRank && <span>final #{chunk.finalRank}</span>}
     </div>
@@ -209,6 +210,14 @@ const RagTracePanel: React.FC<{ trace: RagTrace; content?: string }> = ({ trace,
           <div className="text-xs" style={{ color: "var(--text-muted)" }}>
             query: <span className="font-mono" style={{ color: "var(--text-secondary)" }}>{trace.query}</span>
           </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs" style={{ color: "var(--text-muted)" }}>
+            {trace.queryType && <span>type: <span className="font-mono" style={{ color: "var(--text-secondary)" }}>{trace.queryType}</span></span>}
+            {trace.plannedQuery && trace.plannedQuery !== trace.query && (
+              <span>planned: <span className="font-mono" style={{ color: "var(--text-secondary)" }}>{trace.plannedQuery}</span></span>
+            )}
+            {trace.candidatePoolSize && <span>pool: {trace.candidatePoolSize}</span>}
+            {trace.graphExpansionEnabled && <span>graph: {trace.graphMaxHops ?? 1}-hop</span>}
+          </div>
           {trace.selfRagApplied && (
             <div className="text-xs" style={{ color: "var(--text-muted)" }}>
               Self-RAG:{" "}
@@ -225,6 +234,7 @@ const RagTracePanel: React.FC<{ trace: RagTrace; content?: string }> = ({ trace,
             <TraceStage title="BM25 召回" chunks={trace.bm25Results} compact />
           </div>
           <TraceStage title="RRF 融合后" chunks={trace.rrfResults} compact />
+          <TraceStage title="图谱扩展" chunks={trace.graphExpandedChunks} compact />
           <TraceStage title="Rerank 后" chunks={trace.rerankResults} compact />
           <TraceStage title="最终送入 LLM" chunks={trace.finalChunks} />
         </div>

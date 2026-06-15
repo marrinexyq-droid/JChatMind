@@ -64,7 +64,7 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
     },
     ragConfig: {
       topK: 10,
-      mode: "hybrid-rerank" as RagMode,
+      mode: "hybrid" as RagMode,
     },
   });
 
@@ -87,7 +87,7 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
         },
         ragConfig: editingAgent.ragConfig || {
           topK: 10,
-          mode: "hybrid-rerank" as RagMode,
+          mode: "hybrid" as RagMode,
         },
       });
     } else {
@@ -106,7 +106,7 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
         },
         ragConfig: {
           topK: 10,
-          mode: "hybrid-rerank" as RagMode,
+          mode: "hybrid" as RagMode,
         },
       });
     }
@@ -426,7 +426,7 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
                             { value: "hybrid-rerank", label: "混合检索 + Rerank" },
                           ]}
                           style={{ width: "100%" }}
-                          value={formData?.ragConfig?.mode ?? "hybrid-rerank"}
+                          value={formData?.ragConfig?.mode ?? "hybrid"}
                           onChange={(value: RagMode) =>
                             setFormData({
                               ...formData,
@@ -438,10 +438,9 @@ const AddAgentModal: React.FC<AddAgentModalProps> = ({
                           {formData?.ragConfig?.mode === "vector" &&
                             "仅使用向量相似度检索，速度快但可能遗漏关键词匹配"}
                           {formData?.ragConfig?.mode === "hybrid" &&
-                            "向量检索 + BM25 全文检索通过 RRF 融合，兼顾语义和关键词"}
-                          {(formData?.ragConfig?.mode === "hybrid-rerank" ||
-                            !formData?.ragConfig?.mode) &&
-                            "混合检索后再通过 Cross-Encoder 重排序，命中率最高但速度较慢"}
+                            "向量检索 + BM25 全文检索通过 RRF 融合，日常问答和演示推荐的快速默认模式"}
+                          {formData?.ragConfig?.mode === "hybrid-rerank" &&
+                            "混合检索后再通过 Cross-Encoder 重排序，适合高质量模式，命中率更高但速度较慢"}
                         </p>
                       </div>
                     </div>

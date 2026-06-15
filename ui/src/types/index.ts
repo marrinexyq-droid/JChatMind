@@ -34,6 +34,8 @@ export interface RagTraceChunk {
   bm25Score?: number;
   rrfRank?: number;
   rrfScore?: number;
+  graphRank?: number;
+  graphScore?: number;
   rerankRank?: number;
   rerankScore?: number;
   finalRank?: number;
@@ -41,9 +43,17 @@ export interface RagTraceChunk {
 
 export interface RagTrace {
   query: string;
+  originalQuery?: string;
+  plannedQuery?: string;
+  queryType?: string;
   kbId: string;
   mode: string;
   topK: number;
+  candidatePoolSize?: number;
+  vectorWeight?: number;
+  bm25Weight?: number;
+  graphExpansionEnabled?: boolean;
+  graphMaxHops?: number;
   rerankApplied?: boolean;
   rerankFallback?: boolean;
   selfRagApplied?: boolean;
@@ -53,6 +63,7 @@ export interface RagTrace {
   vectorResults?: RagTraceChunk[];
   bm25Results?: RagTraceChunk[];
   rrfResults?: RagTraceChunk[];
+  graphExpandedChunks?: RagTraceChunk[];
   rerankResults?: RagTraceChunk[];
   finalChunks?: RagTraceChunk[];
 }
