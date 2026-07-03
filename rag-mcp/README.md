@@ -11,3 +11,13 @@ Run tests:
 ```bash
 python -m pytest -q
 ```
+
+Run evaluation environment check:
+
+```bash
+python scripts/evaluate.py
+```
+
+Version 1.0 is complete when tests pass and the evaluation script reports whether
+the existing Java RAG baseline report and the optional `ragas` package are
+available in the local environment.
