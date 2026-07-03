@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import importlib.util
+import importlib
 
 
 def check_ragas_available() -> dict[str, str | bool]:
-    spec = importlib.util.find_spec("ragas")
-    if spec is None:
+    try:
+        importlib.import_module("ragas")
+    except Exception as exc:
         return {
             "available": False,
-            "message": "ragas is not installed in this Python environment",
+            "message": f"ragas is not importable: {exc}",
         }
     return {
         "available": True,
