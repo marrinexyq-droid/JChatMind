@@ -24,6 +24,9 @@ logs/
 
 # --- Data ---
 data/
+!rag-mcp/data/
+!rag-mcp/data/evaluation/
+!rag-mcp/data/evaluation/**
 *.sql
 !jchatmind/src/main/resources/**/*.sql
 

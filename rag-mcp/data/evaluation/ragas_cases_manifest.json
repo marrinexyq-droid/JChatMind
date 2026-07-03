@@ -1,0 +1,55 @@
+{
+  "counts": {
+    "answer_generation_cases": 182,
+    "gold_retrieval_cases": 58,
+    "legacy_retrieval_observations": 774,
+    "total_records": 1014
+  },
+  "difficulty_counts": {
+    "easy": 572,
+    "hard": 33,
+    "medium": 409
+  },
+  "files": {
+    "answer_generation": "answer_generation_cases.jsonl",
+    "combined": "ragas_cases.combined.jsonl",
+    "gold_retrieval": "gold_retrieval_cases.jsonl",
+    "legacy_observations": "legacy_retrieval_observations.jsonl",
+    "schema": "ragas_cases.schema.json"
+  },
+  "generated_at": "2026-07-03T00:00:00Z",
+  "generator": "scripts/build_ragas_cases.py",
+  "quarantine": {
+    "excluded_from_primary_gold": 27,
+    "known_issue": "Files under data/documents are clean UTF-8, but overlap with rag_eval labels and contain duplicate copies across knowledge bases. Primary gold cases are therefore taken from rag_eval/data/queries.json to preserve query_id and logical chunk traceability.",
+    "markdown_files": 27,
+    "source_root": "data/documents",
+    "structured_files": 20,
+    "suspected_mojibake_files": 0
+  },
+  "source_counts": {
+    "clean_markdown_section": 182,
+    "legacy_queries_json": 58,
+    "legacy_raw_results": 774
+  },
+  "strict_quality_policy": {
+    "excluded": "raw error records, duplicate results_v1.json, low-value export wrapper sections, duplicate Markdown knowledge-base copies",
+    "primary_sources": "clean JSON labels or clean Markdown sections only",
+    "required": [
+      "stable case_id",
+      "non-empty question",
+      "non-empty ground_truth",
+      "ground_truth_context_ids",
+      "source_refs",
+      "quality metadata"
+    ]
+  },
+  "tactic_counts": {
+    "failure_mode": 21,
+    "generated_llm_question": 28,
+    "hypothetical_question": 30,
+    "retrieval_benchmark_observation": 774,
+    "section_key_items": 60,
+    "section_summary": 101
+  }
+}

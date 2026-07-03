@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "answer": {
+      "type": "string"
+    },
+    "answer_status": {
+      "type": "string"
+    },
+    "case_id": {
+      "minLength": 8,
+      "type": "string"
+    },
+    "collection": {
+      "type": "string"
+    },
+    "contexts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "dataset_split": {
+      "type": "string"
+    },
+    "difficulty": {
+      "enum": [
+        "easy",
+        "medium",
+        "hard"
+      ]
+    },
+    "expected_answer_type": {
+      "type": "string"
+    },
+    "ground_truth": {
+      "minLength": 20,
+      "type": "string"
+    },
+    "ground_truth_context_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "quality": {
+      "type": "object"
+    },
+    "question": {
+      "minLength": 5,
+      "type": "string"
+    },
+    "reference_answer": {
+      "type": "string"
+    },
+    "reference_contexts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "retrieved_context_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "source_refs": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "tactic": {
+      "type": "string"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "case_id",
+    "dataset_split",
+    "question",
+    "answer",
+    "contexts",
+    "ground_truth",
+    "reference_contexts",
+    "ground_truth_context_ids",
+    "collection",
+    "tags",
+    "difficulty",
+    "expected_answer_type",
+    "tactic",
+    "source_refs",
+    "quality"
+  ],
+  "title": "JChatMind RAGAS Case",
+  "type": "object"
+}
