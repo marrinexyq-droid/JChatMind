@@ -45,6 +45,14 @@ reranker:
   base-url: http://127.0.0.1:8001
 
 rag:
+  python-bridge:
+    enabled: false
+    project-root: ../rag-mcp
+    python-executable: python
+    python-args: []
+    timeout-ms: 8000
+    fallback-on-error: true
+    fallback-on-empty: true
   self-rag:
     enabled: true
     min-final-chunks: 2

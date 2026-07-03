@@ -66,6 +66,7 @@ def test_mcp_server_lists_tools_and_calls_query(tmp_path):
     result = response["result"]
     assert result["isError"] is False
     assert result["structuredContent"]["result_count"] == 1
+    assert "MCP tools expose" in result["structuredContent"]["citations"][0]["text"]
     assert "Evidence found:" in result["content"][0]["text"]
 
 

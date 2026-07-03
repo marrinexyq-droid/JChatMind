@@ -43,6 +43,7 @@ class KnowledgeHub:
                 "citation_id": result.citation_id,
                 "chunk_id": result.chunk_id,
                 "document_id": result.document_id,
+                "text": result.text,
                 "score": round(result.score, 6),
                 "source": result.source,
                 "metadata": result.metadata,

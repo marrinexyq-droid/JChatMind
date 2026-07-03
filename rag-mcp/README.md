@@ -64,3 +64,6 @@ embeddings, SQLite vector storage, SQLite sparse search, and hybrid fusion.
 
 Version 1.2 adds a minimal MCP-compatible stdio tool layer over the local
 ingestion/query MVP.
+
+Version 1.3 adds a guarded Java bridge that can call the MCP stdio tool layer
+behind `rag.python-bridge.enabled`, with the legacy Java RAG path as fallback.
