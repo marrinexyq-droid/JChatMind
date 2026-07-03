@@ -111,6 +111,41 @@ class SqliteVectorStore:
             for chunk_id, document_id, row_collection, text, metadata_json in rows
         ]
 
+    def list_collections(self) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT collection FROM chunks ORDER BY collection"
+            ).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def list_document_chunks(
+        self,
+        document_id: str,
+        collection: str | None = None,
+    ) -> list[ChunkRecord]:
+        query = """
+            SELECT chunk_id, document_id, collection, text, metadata_json
+            FROM chunks
+            WHERE document_id = ?
+        """
+        params: tuple[Any, ...] = (document_id,)
+        if collection is not None:
+            query += " AND collection = ?"
+            params = (document_id, collection)
+        query += " ORDER BY collection, document_id, chunk_id"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            ChunkRecord(
+                id=chunk_id,
+                document_id=row_document_id,
+                collection=row_collection,
+                text=text,
+                metadata=_loads_json_object(metadata_json),
+            )
+            for chunk_id, row_document_id, row_collection, text, metadata_json in rows
+        ]
+
     def _init_schema(self) -> None:
         with self._connect() as conn:
             conn.execute(

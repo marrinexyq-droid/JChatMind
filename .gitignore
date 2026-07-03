@@ -13,10 +13,13 @@ target/
 node_modules/
 dist/
 build/
+__pycache__/
+*.py[cod]
 
 # --- Logs ---
 *.log
 logs/
+jchatmind/output.txt
 
 # --- Env ---
 .env

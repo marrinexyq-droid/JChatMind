@@ -45,9 +45,22 @@ Query the local index:
 python scripts/query.py "What does this document say about RAG?" --collection default
 ```
 
+Run the MCP-compatible stdio server:
+
+```bash
+python main.py
+```
+
+The server exposes `query_knowledge_hub`, `list_collections`, and
+`get_document_summary` over JSON-RPC stdio. It keeps protocol responses on
+stdout so MCP clients can consume them.
+
 Version 1.0 is complete when tests pass and the evaluation script reports whether
 the existing Java RAG baseline report and the optional `ragas` package are
 available in the local environment.
 
 Version 1.1 adds an offline ingestion/query MVP using deterministic local
 embeddings, SQLite vector storage, SQLite sparse search, and hybrid fusion.
+
+Version 1.2 adds a minimal MCP-compatible stdio tool layer over the local
+ingestion/query MVP.
