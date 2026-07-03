@@ -11,8 +11,9 @@ from src.evaluation.runner import summarize_environment
 
 
 def main() -> int:
-    settings = Settings.load(Path("config/settings.yaml"))
-    summary = summarize_environment(Path(settings.evaluation.baseline_report))
+    settings = Settings.load(PROJECT_ROOT / "config/settings.yaml")
+    baseline_report = (PROJECT_ROOT / settings.evaluation.baseline_report).resolve()
+    summary = summarize_environment(baseline_report)
     print("RAG-MCP evaluation environment")
     print(f"baseline_report_exists={summary.baseline_report_exists}")
     print(f"baseline_report_path={summary.baseline_report_path}")
