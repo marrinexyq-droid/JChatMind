@@ -1,0 +1,23 @@
+app_name: rag-mcp
+
+storage:
+  chroma_path: data/db/chroma
+  bm25_path: data/db/bm25
+  ingestion_history_db: data/db/ingestion_history.db
+  image_index_db: data/db/image_index.db
+  traces_path: logs/traces.jsonl
+
+embedding:
+  provider: ollama
+  model: bge-m3
+  base_url: http://localhost:11434
+
+retrieval:
+  rrf_k: 60
+  default_top_k: 5
+  candidate_pool_size: 20
+  rerank_backend: none
+
+evaluation:
+  baseline_report: ../jchatmind/reranker-service/rag_eval/output/rag_eval_report.md
+  metrics_dir: output/metrics
