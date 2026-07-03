@@ -170,3 +170,30 @@ pool size, vector/BM25/RRF/rerank ranks, GraphRAG-lite expanded chunks, final
 chunks, and Self-RAG decisions. The chat UI exposes this in the RAG evidence
 panel, so a demo can show not only the final answer but also why those evidence
 chunks were selected.
+
+## Google GenAI / Gemini
+
+JChatMind can register a Google Gemini chat client with the model id
+`gemini-2.5-flash`. The API key is read only from environment variables and is
+not committed to the repository.
+
+PowerShell:
+
+```powershell
+$env:GOOGLE_API_KEY = "<your-google-ai-studio-api-key>"
+$env:GOOGLE_GENAI_MODEL = "gemini-2.5-flash"
+```
+
+Agent model id:
+
+```text
+gemini-2.5-flash
+```
+
+Optional tuning variables:
+
+```text
+GOOGLE_GENAI_TEMPERATURE=0.7
+GOOGLE_GENAI_MAX_OUTPUT_TOKENS=2048
+GOOGLE_GENAI_TIMEOUT_MILLIS=30000
+```

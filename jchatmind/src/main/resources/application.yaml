@@ -32,6 +32,13 @@ spring:
       chat:
         options:
           model: glm-4.6v
+    google:
+      genai:
+        api-key: ${GOOGLE_API_KEY:}
+        model: ${GOOGLE_GENAI_MODEL:gemini-2.5-flash}
+        temperature: ${GOOGLE_GENAI_TEMPERATURE:0.7}
+        max-output-tokens: ${GOOGLE_GENAI_MAX_OUTPUT_TOKENS:2048}
+        timeout-millis: ${GOOGLE_GENAI_TIMEOUT_MILLIS:30000}
 mybatis:
   type-aliases-package: com.marrine.jchatmind.model.entity
   mapper-locations: classpath:mapper/*.xml
