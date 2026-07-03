@@ -18,6 +18,21 @@ Run evaluation environment check:
 python scripts/evaluate.py
 ```
 
+Ingest a Markdown document:
+
+```bash
+python scripts/ingest.py path/to/document.md --collection default
+```
+
+Query the local index:
+
+```bash
+python scripts/query.py "What does this document say about RAG?" --collection default
+```
+
 Version 1.0 is complete when tests pass and the evaluation script reports whether
 the existing Java RAG baseline report and the optional `ragas` package are
 available in the local environment.
+
+Version 1.1 adds an offline ingestion/query MVP using deterministic local
+embeddings, SQLite vector storage, SQLite sparse search, and hybrid fusion.

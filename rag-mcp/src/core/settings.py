@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 class StorageSettings(BaseModel):
     chroma_path: str
+    vector_store_db: str = "data/db/vector_store.db"
     bm25_path: str
     ingestion_history_db: str
     image_index_db: str
