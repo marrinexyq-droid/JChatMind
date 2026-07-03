@@ -18,6 +18,21 @@ Run evaluation environment check:
 python scripts/evaluate.py
 ```
 
+Build the strict RAGAS battle dataset:
+
+```bash
+python scripts/build_ragas_cases.py
+```
+
+Run offline dataset evaluation:
+
+```bash
+python scripts/evaluate_ragas_cases.py --output-json output/metrics/ragas_cases_offline_report.json
+```
+
+The offline evaluator computes retrieval metrics from the strict JSONL dataset.
+LLM-judged RAGAS metrics such as faithfulness require a configured judge model.
+
 Ingest a Markdown document:
 
 ```bash
