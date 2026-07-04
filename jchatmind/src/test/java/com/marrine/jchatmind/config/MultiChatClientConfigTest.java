@@ -21,11 +21,13 @@ class MultiChatClientConfigTest {
 
     @Test
     void doesNotRegisterGeminiClientWithoutApiKey() {
-        contextRunner.run(context -> {
-            assertThat(context).hasBean("deepseek-chat");
-            assertThat(context).hasBean("glm-4.6");
-            assertThat(context).doesNotHaveBean("gemini-2.5-flash");
-        });
+        contextRunner
+                .withPropertyValues("spring.ai.google.genai.api-key=")
+                .run(context -> {
+                    assertThat(context).hasBean("deepseek-chat");
+                    assertThat(context).hasBean("glm-4.6");
+                    assertThat(context).doesNotHaveBean("gemini-2.5-flash");
+                });
     }
 
     @Test
