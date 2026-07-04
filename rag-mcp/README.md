@@ -51,9 +51,9 @@ Run the MCP-compatible stdio server:
 python main.py
 ```
 
-The server exposes `query_knowledge_hub`, `list_collections`, and
-`get_document_summary` over JSON-RPC stdio. It keeps protocol responses on
-stdout so MCP clients can consume them.
+The server exposes `query_knowledge_hub`, `list_collections`,
+`get_system_status`, and `get_document_summary` over JSON-RPC stdio. It keeps
+protocol responses on stdout so MCP clients can consume them.
 
 Version 1.0 is complete when tests pass and the evaluation script reports whether
 the existing Java RAG baseline report and the optional `ragas` package are
@@ -91,6 +91,12 @@ Version 1.7 adds guarded delete synchronization. Python exposes
 deletion calls it when `rag.python-bridge.ingestion-enabled=true`, removing
 matching vector chunks, sparse chunks, and ingestion history before local
 document deletion continues.
+
+Version 1.8 adds a guarded bridge readiness layer. Python exposes
+`get_system_status` for MCP status checks, and Java can verify `initialize`,
+`tools/list`, and status payloads through the same stdio bridge before query
+cutover. Spring Actuator health reports the bridge as disabled without spawning
+Python when both bridge flags are off.
 
 Validate dashboard inputs without Streamlit:
 

@@ -40,6 +40,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "get_system_status",
+        "description": "Return rag-mcp readiness and local index summary.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "get_document_summary",
         "description": "Return a compact summary and metadata for one indexed document.",
         "inputSchema": {
@@ -83,7 +88,7 @@ class JsonRpcMcpServer:
             return {
                 "protocolVersion": str(params.get("protocolVersion", "2024-11-05")),
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "jchatmind-rag-mcp", "version": "1.2.0"},
+                "serverInfo": {"name": "jchatmind-rag-mcp", "version": "1.8.0"},
             }
         if method == "tools/list":
             return {"tools": TOOL_SCHEMAS}
@@ -111,6 +116,8 @@ class JsonRpcMcpServer:
             )
         if name == "list_collections":
             return self.hub.list_collections()
+        if name == "get_system_status":
+            return self.hub.get_system_status()
         if name == "get_document_summary":
             return self.hub.get_document_summary(
                 doc_id=str(arguments.get("doc_id", "")),

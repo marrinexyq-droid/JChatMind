@@ -45,7 +45,12 @@ def test_mcp_server_lists_tools_and_calls_query(tmp_path):
     tools = server.handle_message({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     names = {tool["name"] for tool in tools["result"]["tools"]}
 
-    assert {"query_knowledge_hub", "list_collections", "get_document_summary"} <= names
+    assert {
+        "query_knowledge_hub",
+        "list_collections",
+        "get_system_status",
+        "get_document_summary",
+    } <= names
 
     response = server.handle_message(
         {
@@ -99,6 +104,26 @@ def test_mcp_server_lists_collections_and_summarizes_document(tmp_path):
     assert payload["document_id"] == document_id
     assert payload["chunk_count"] == 1
     assert "MCP tools expose" in payload["preview"]
+
+
+def test_mcp_server_reports_system_status(tmp_path):
+    hub, _ = build_hub(tmp_path)
+    server = JsonRpcMcpServer(hub)
+
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "get_system_status", "arguments": {}},
+        }
+    )
+
+    payload = response["result"]["structuredContent"]
+    assert payload["status"] == "ready"
+    assert payload["collections"] == ["mcp-test"]
+    assert payload["collection_chunk_counts"] == {"mcp-test": 1}
+    assert payload["total_chunks"] == 1
 
 
 def test_mcp_server_rejects_invalid_params_and_retrieval_mode(tmp_path):

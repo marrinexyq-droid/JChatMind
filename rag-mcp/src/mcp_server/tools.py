@@ -70,6 +70,25 @@ class KnowledgeHub:
         )
         return ToolPayload(text=text, data={"collections": collections})
 
+    def get_system_status(self) -> ToolPayload:
+        counts = self.vector_store.collection_chunk_counts()
+        total_chunks = sum(counts.values())
+        collections = list(counts.keys())
+        text = (
+            "rag-mcp status: ready\n"
+            f"collections={len(collections)}\n"
+            f"total_chunks={total_chunks}"
+        )
+        return ToolPayload(
+            text=text,
+            data={
+                "status": "ready",
+                "collections": collections,
+                "collection_chunk_counts": counts,
+                "total_chunks": total_chunks,
+            },
+        )
+
     def get_document_summary(
         self,
         doc_id: str,

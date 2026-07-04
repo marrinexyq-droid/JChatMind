@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.marrine.jchatmind.config.PythonRagBridgeProperties;
+import com.marrine.jchatmind.model.vo.PythonRagBridgeReadiness;
 import com.marrine.jchatmind.model.vo.QueryPlan;
 import com.marrine.jchatmind.model.vo.RagSearchResult;
 import com.marrine.jchatmind.model.vo.RagTrace;
@@ -17,8 +18,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -28,45 +32,51 @@ import java.util.stream.IntStream;
 @Slf4j
 @RequiredArgsConstructor
 public class PythonRagMcpClient {
+    private static final String QUERY_ID = "java-rag-bridge";
+    private static final String READINESS_INITIALIZE_ID = "java-rag-readiness-initialize";
+    private static final String READINESS_TOOLS_ID = "java-rag-readiness-tools";
+    private static final String READINESS_STATUS_ID = "java-rag-readiness-status";
+    private static final Set<String> REQUIRED_TOOLS = Set.of(
+            "query_knowledge_hub",
+            "list_collections",
+            "get_system_status",
+            "get_document_summary"
+    );
+
     private final PythonRagBridgeProperties properties;
     private final ObjectMapper objectMapper;
 
     public Optional<RagSearchResult> search(String kbId, QueryPlan queryPlan) {
         QueryPlan plan = normalizePlan(queryPlan);
         try {
-            Process process = new ProcessBuilder(command())
-                    .directory(properties.resolvedProjectRoot().toFile())
-                    .redirectError(ProcessBuilder.Redirect.PIPE)
-                    .start();
-            String request = buildToolCall(kbId, plan) + System.lineSeparator();
-            process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
-            process.getOutputStream().close();
-            CompletableFuture<String> stdoutFuture = readAsync(process.getInputStream());
-            CompletableFuture<String> stderrFuture = readAsync(process.getErrorStream());
-
-            boolean finished = process.waitFor(properties.getTimeoutMs(), TimeUnit.MILLISECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                log.warn("Python RAG MCP query timed out after {}ms", properties.getTimeoutMs());
+            Optional<String> stdout = runMcpRequests(
+                    List.of(buildToolCall(kbId, plan)),
+                    properties.getTimeoutMs(),
+                    "query"
+            );
+            if (stdout.isEmpty()) {
                 return Optional.empty();
             }
-
-            String stdout = stdoutFuture.get();
-            String stderr = stderrFuture.get();
-            if (process.exitValue() != 0) {
-                log.warn("Python RAG MCP exited with code {}: {}", process.exitValue(), stderr.trim());
-                return Optional.empty();
-            }
-            return parseResponse(stdout, kbId, plan);
+            return parseResponse(stdout.get(), kbId, plan);
         } catch (IOException e) {
             log.warn("Python RAG MCP query failed: {}", e.getMessage());
             return Optional.empty();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("Python RAG MCP query interrupted");
-            return Optional.empty();
-        } catch (ExecutionException e) {
-            log.warn("Python RAG MCP output read failed: {}", e.getMessage());
+        }
+    }
+
+    public Optional<PythonRagBridgeReadiness> checkReadiness() {
+        try {
+            Optional<String> stdout = runMcpRequests(
+                    List.of(buildInitialize(), buildToolsList(), buildSystemStatusCall()),
+                    properties.getTimeoutMs(),
+                    "readiness"
+            );
+            if (stdout.isEmpty()) {
+                return Optional.empty();
+            }
+            return parseReadinessResponse(stdout.get());
+        } catch (IOException e) {
+            log.warn("Python RAG MCP readiness check failed: {}", e.getMessage());
             return Optional.empty();
         }
     }
@@ -119,6 +129,47 @@ public class PythonRagMcpClient {
                 .build());
     }
 
+    Optional<PythonRagBridgeReadiness> parseReadinessResponse(String stdout) throws IOException {
+        List<JsonNode> responses = parseJsonLines(stdout);
+        if (responses.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<JsonNode> error = responses.stream().filter(node -> node.has("error")).findFirst();
+        if (error.isPresent()) {
+            log.warn("Python RAG MCP readiness returned error: {}", error.get().path("error").path("message").asText());
+            return Optional.empty();
+        }
+
+        JsonNode initialize = responseById(responses, READINESS_INITIALIZE_ID).orElse(null);
+        JsonNode toolsResponse = responseById(responses, READINESS_TOOLS_ID).orElse(null);
+        JsonNode statusResponse = responseById(responses, READINESS_STATUS_ID).orElse(null);
+        if (initialize == null || toolsResponse == null || statusResponse == null) {
+            return Optional.empty();
+        }
+
+        JsonNode serverInfo = initialize.path("result").path("serverInfo");
+        List<String> tools = toolNames(toolsResponse.path("result").path("tools"));
+        JsonNode status = statusResponse.path("result").path("structuredContent");
+        if (status.isMissingNode() || status.path("status").asText("").isBlank()) {
+            return Optional.empty();
+        }
+
+        List<String> collections = stringArray(status.path("collections"));
+        Map<String, Integer> collectionChunkCounts = integerMap(status.path("collection_chunk_counts"));
+        boolean requiredToolsPresent = tools.containsAll(REQUIRED_TOOLS);
+        boolean ready = requiredToolsPresent && "ready".equals(status.path("status").asText());
+        return Optional.of(PythonRagBridgeReadiness.builder()
+                .ready(ready)
+                .serverName(serverInfo.path("name").asText(""))
+                .serverVersion(serverInfo.path("version").asText(""))
+                .tools(tools)
+                .collections(collections)
+                .collectionChunkCounts(collectionChunkCounts)
+                .totalChunks(status.path("total_chunks").asInt(0))
+                .message(ready ? "ready" : "required MCP tools missing or status is not ready")
+                .build());
+    }
+
     private String buildToolCall(String kbId, QueryPlan plan) throws IOException {
         ObjectNode arguments = objectMapper.createObjectNode();
         arguments.put("query", plan.effectiveSearchQuery());
@@ -132,7 +183,45 @@ public class PythonRagMcpClient {
 
         ObjectNode request = objectMapper.createObjectNode();
         request.put("jsonrpc", "2.0");
-        request.put("id", "java-rag-bridge");
+        request.put("id", QUERY_ID);
+        request.put("method", "tools/call");
+        request.set("params", params);
+        return objectMapper.writeValueAsString(request);
+    }
+
+    private String buildInitialize() throws IOException {
+        ObjectNode clientInfo = objectMapper.createObjectNode();
+        clientInfo.put("name", "jchatmind-java-bridge");
+        clientInfo.put("version", "1.8.0");
+
+        ObjectNode params = objectMapper.createObjectNode();
+        params.put("protocolVersion", "2024-11-05");
+        params.set("clientInfo", clientInfo);
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("jsonrpc", "2.0");
+        request.put("id", READINESS_INITIALIZE_ID);
+        request.put("method", "initialize");
+        request.set("params", params);
+        return objectMapper.writeValueAsString(request);
+    }
+
+    private String buildToolsList() throws IOException {
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("jsonrpc", "2.0");
+        request.put("id", READINESS_TOOLS_ID);
+        request.put("method", "tools/list");
+        return objectMapper.writeValueAsString(request);
+    }
+
+    private String buildSystemStatusCall() throws IOException {
+        ObjectNode params = objectMapper.createObjectNode();
+        params.put("name", "get_system_status");
+        params.set("arguments", objectMapper.createObjectNode());
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("jsonrpc", "2.0");
+        request.put("id", READINESS_STATUS_ID);
         request.put("method", "tools/call");
         request.set("params", params);
         return objectMapper.writeValueAsString(request);
@@ -145,6 +234,46 @@ public class PythonRagMcpClient {
         command.addAll(properties.getPythonArgs());
         command.add(main.toString());
         return command;
+    }
+
+    private Optional<String> runMcpRequests(List<String> requests, long timeoutMs, String operation) {
+        try {
+            Process process = new ProcessBuilder(command())
+                    .directory(properties.resolvedProjectRoot().toFile())
+                    .redirectError(ProcessBuilder.Redirect.PIPE)
+                    .start();
+            for (String request : requests) {
+                process.getOutputStream().write((request + System.lineSeparator()).getBytes(StandardCharsets.UTF_8));
+            }
+            process.getOutputStream().close();
+            CompletableFuture<String> stdoutFuture = readAsync(process.getInputStream());
+            CompletableFuture<String> stderrFuture = readAsync(process.getErrorStream());
+
+            boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                log.warn("Python RAG MCP {} timed out after {}ms", operation, timeoutMs);
+                return Optional.empty();
+            }
+
+            String stdout = stdoutFuture.get();
+            String stderr = stderrFuture.get();
+            if (process.exitValue() != 0) {
+                log.warn("Python RAG MCP {} exited with code {}: {}", operation, process.exitValue(), stderr.trim());
+                return Optional.empty();
+            }
+            return Optional.of(stdout);
+        } catch (IOException e) {
+            log.warn("Python RAG MCP {} failed: {}", operation, e.getMessage());
+            return Optional.empty();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Python RAG MCP {} interrupted", operation);
+            return Optional.empty();
+        } catch (ExecutionException e) {
+            log.warn("Python RAG MCP {} output read failed: {}", operation, e.getMessage());
+            return Optional.empty();
+        }
     }
 
     private CompletableFuture<String> readAsync(java.io.InputStream inputStream) {
@@ -168,6 +297,54 @@ public class PythonRagMcpClient {
                 .topK(5)
                 .candidatePoolSize(20)
                 .build();
+    }
+
+    private List<JsonNode> parseJsonLines(String stdout) throws IOException {
+        List<JsonNode> responses = new ArrayList<>();
+        for (String line : stdout.lines().filter(value -> !value.isBlank()).toList()) {
+            responses.add(objectMapper.readTree(line));
+        }
+        return responses;
+    }
+
+    private Optional<JsonNode> responseById(List<JsonNode> responses, String id) {
+        return responses.stream()
+                .filter(node -> id.equals(node.path("id").asText()))
+                .findFirst();
+    }
+
+    private List<String> toolNames(JsonNode toolsNode) {
+        List<String> tools = new ArrayList<>();
+        if (!toolsNode.isArray()) {
+            return tools;
+        }
+        for (JsonNode tool : toolsNode) {
+            String name = tool.path("name").asText("");
+            if (!name.isBlank()) {
+                tools.add(name);
+            }
+        }
+        return tools;
+    }
+
+    private List<String> stringArray(JsonNode arrayNode) {
+        List<String> values = new ArrayList<>();
+        if (!arrayNode.isArray()) {
+            return values;
+        }
+        for (JsonNode value : arrayNode) {
+            values.add(value.asText());
+        }
+        return values;
+    }
+
+    private Map<String, Integer> integerMap(JsonNode objectNode) {
+        Map<String, Integer> values = new LinkedHashMap<>();
+        if (!objectNode.isObject()) {
+            return values;
+        }
+        objectNode.fields().forEachRemaining(entry -> values.put(entry.getKey(), entry.getValue().asInt()));
+        return values;
     }
 
     private RagTrace buildTrace(String kbId, QueryPlan plan, List<ScoredChunk> chunks) {

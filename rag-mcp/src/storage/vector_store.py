@@ -119,6 +119,18 @@ class SqliteVectorStore:
             ).fetchall()
         return [str(row[0]) for row in rows]
 
+    def collection_chunk_counts(self) -> dict[str, int]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT collection, COUNT(*)
+                FROM chunks
+                GROUP BY collection
+                ORDER BY collection
+                """
+            ).fetchall()
+        return {str(collection): int(count) for collection, count in rows}
+
     def list_document_chunks(
         self,
         document_id: str,
