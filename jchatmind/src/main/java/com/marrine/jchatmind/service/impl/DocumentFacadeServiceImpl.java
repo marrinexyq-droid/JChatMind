@@ -188,6 +188,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     @Override
     public void deleteDocument(String documentId) {
         Document document = documentMapper.selectById(documentId);
+        String filePath = null;
         if (document == null) {
             throw new BizException("文档不存在: " + documentId);
         }
@@ -196,12 +197,24 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
         try {
             DocumentDTO documentDTO = documentConverter.toDTO(document);
             if (documentDTO.getMetadata() != null && documentDTO.getMetadata().getFilePath() != null) {
-                String filePath = documentDTO.getMetadata().getFilePath();
+                filePath = documentDTO.getMetadata().getFilePath();
+            }
+        } catch (Exception e) {
+            log.warn("Failed to read document metadata before deletion: documentId={}, error={}",
+                    documentId, e.getMessage());
+        }
+
+        if (filePath != null && pythonRagIngestionClient.isEnabled()) {
+            pythonRagIngestionClient.delete(document.getKbId(), documentStorageService.getFilePath(filePath));
+        }
+
+        try {
+            if (filePath != null) {
                 documentStorageService.deleteFile(filePath);
             }
         } catch (Exception e) {
-            log.warn("删除文件失败，继续删除文档记录: documentId={}, error={}", documentId, e.getMessage());
-            // 即使文件删除失败，也继续删除数据库记录
+            log.warn("Failed to delete document file, continuing database deletion: documentId={}, error={}",
+                    documentId, e.getMessage());
         }
 
         graphRagService.deleteDocumentGraph(documentId);

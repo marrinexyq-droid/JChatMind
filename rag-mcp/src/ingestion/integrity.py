@@ -50,6 +50,17 @@ class FileIntegrityStore:
     ) -> None:
         self._upsert(source_path, collection, sha256, "failed", None, 0, error)
 
+    def delete(self, source_path: Path, collection: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM ingestion_history
+                WHERE source_path = ? AND collection = ?
+                """,
+                (str(source_path), collection),
+            )
+        return cursor.rowcount > 0
+
     def _upsert(
         self,
         source_path: Path,

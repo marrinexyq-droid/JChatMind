@@ -35,7 +35,8 @@ class SqliteSparseIndex:
                     ),
                 )
 
-    def delete_by_source_path(self, collection: str, source_path: str) -> None:
+    def delete_by_source_path(self, collection: str, source_path: str) -> int:
+        deleted = 0
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -49,6 +50,8 @@ class SqliteSparseIndex:
                 metadata = _loads_json_object(metadata_json)
                 if metadata.get("source_path") == source_path:
                     conn.execute("DELETE FROM chunk_fts WHERE chunk_id = ?", (chunk_id,))
+                    deleted += 1
+        return deleted
 
     def search(self, collection: str, query: str, top_k: int) -> list[RetrievalResult]:
         terms = _query_terms(query)

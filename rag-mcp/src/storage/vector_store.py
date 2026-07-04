@@ -45,20 +45,21 @@ class SqliteVectorStore:
                 ],
             )
 
-    def delete_by_source_path(self, collection: str, source_path: str) -> None:
+    def delete_by_source_path(self, collection: str, source_path: str) -> int:
         chunk_ids = [
             chunk.id
             for chunk in self.list_chunks(collection)
             if chunk.metadata.get("source_path") == source_path
         ]
         if not chunk_ids:
-            return
+            return 0
         placeholders = ",".join("?" for _ in chunk_ids)
         with self._connect() as conn:
             conn.execute(
                 f"DELETE FROM chunks WHERE collection = ? AND chunk_id IN ({placeholders})",
                 (collection, *chunk_ids),
             )
+        return len(chunk_ids)
 
     def similarity_search(
         self,

@@ -86,6 +86,12 @@ Version 1.6 adds a guarded Java ingestion bridge. When
 kept warm before query cutover. The bridge remains disabled and fail-open by
 default.
 
+Version 1.7 adds guarded delete synchronization. Python exposes
+`scripts/delete_document.py <file> --collection <kbId>` and Java document
+deletion calls it when `rag.python-bridge.ingestion-enabled=true`, removing
+matching vector chunks, sparse chunks, and ingestion history before local
+document deletion continues.
+
 Validate dashboard inputs without Streamlit:
 
 ```bash

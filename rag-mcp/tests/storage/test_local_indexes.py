@@ -32,3 +32,33 @@ def test_sqlite_sparse_index_returns_keyword_match(tmp_path):
 
     assert results[0].chunk_id == "c2"
     assert results[0].source == "sparse"
+
+
+def test_local_indexes_delete_by_source_path(tmp_path):
+    provider = HashEmbeddingProvider(dimensions=32)
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    chunks = [
+        ChunkRecord(
+            "c1",
+            "d1",
+            "notes",
+            "delete this chunk",
+            metadata={"source_path": "a.md"},
+        ),
+        ChunkRecord(
+            "c2",
+            "d2",
+            "notes",
+            "keep this chunk",
+            metadata={"source_path": "b.md"},
+        ),
+    ]
+
+    vector_store.upsert_chunks(chunks, [provider.embed_text(chunk.text) for chunk in chunks])
+    sparse_index.upsert_chunks(chunks)
+
+    assert vector_store.delete_by_source_path("notes", "a.md") == 1
+    assert sparse_index.delete_by_source_path("notes", "a.md") == 1
+    assert [chunk.id for chunk in vector_store.list_chunks("notes")] == ["c2"]
+    assert [result.chunk_id for result in sparse_index.search("notes", "keep", 3)] == ["c2"]

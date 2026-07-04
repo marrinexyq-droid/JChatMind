@@ -23,6 +23,17 @@ class IngestionResult:
     message: str
 
 
+@dataclass(frozen=True)
+class DeleteResult:
+    status: str
+    source_path: str
+    collection: str
+    vector_chunks_deleted: int
+    sparse_chunks_deleted: int
+    history_deleted: bool
+    message: str
+
+
 class IngestionPipeline:
     def __init__(
         self,
@@ -118,6 +129,36 @@ class IngestionPipeline:
             self.integrity_store.mark_failed(source_path, collection, digest, str(exc))
             self._write_trace(trace, error=str(exc))
             raise
+
+    def delete(self, source_path: Path, collection: str = "default") -> DeleteResult:
+        trace = TraceContext(
+            trace_type="deletion",
+            inputs={"source_path": str(source_path), "collection": collection},
+        )
+        vector_deleted = self.vector_store.delete_by_source_path(collection, str(source_path))
+        sparse_deleted = self.sparse_index.delete_by_source_path(collection, str(source_path))
+        history_deleted = self.integrity_store.delete(source_path, collection)
+        trace.record_stage(
+            "delete",
+            method="sqlite",
+            details={
+                "vector_chunks_deleted": vector_deleted,
+                "sparse_chunks_deleted": sparse_deleted,
+                "history_deleted": history_deleted,
+            },
+        )
+        status = "deleted" if vector_deleted or sparse_deleted or history_deleted else "not_found"
+        result = DeleteResult(
+            status=status,
+            source_path=str(source_path),
+            collection=collection,
+            vector_chunks_deleted=vector_deleted,
+            sparse_chunks_deleted=sparse_deleted,
+            history_deleted=history_deleted,
+            message="document index entries deleted" if status == "deleted" else "document not indexed",
+        )
+        self._write_trace(trace)
+        return result
 
     def _write_trace(self, trace: TraceContext, error: str | None = None) -> None:
         if self.trace_writer is not None:

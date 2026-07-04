@@ -43,12 +43,39 @@ class PythonRagIngestionClientTest {
     }
 
     @Test
+    void deleteCommandInvokesDeleteScriptWithCollection() {
+        PythonRagBridgeProperties properties = new PythonRagBridgeProperties();
+        properties.setProjectRoot(Path.of("..", "rag-mcp").toString());
+        properties.setPythonExecutable("py");
+        PythonRagIngestionClient client = new PythonRagIngestionClient(properties);
+        Path source = Path.of("data/documents/kb/doc.md");
+
+        List<String> command = client.deleteCommand(source, "kb");
+
+        assertEquals("py", command.get(0));
+        assertTrue(command.get(1).endsWith("rag-mcp\\scripts\\delete_document.py")
+                || command.get(1).endsWith("rag-mcp/scripts/delete_document.py"));
+        assertEquals(source.toAbsolutePath().normalize().toString(), command.get(2));
+        assertEquals("--collection", command.get(3));
+        assertEquals("kb", command.get(4));
+    }
+
+    @Test
     void enabledIngestionReturnsTrueWhenProcessSucceeds() {
         PythonRagBridgeProperties properties = enabledProperties();
         properties.setPythonArgs(List.of("-version"));
         PythonRagIngestionClient client = new PythonRagIngestionClient(properties);
 
         assertTrue(client.ingest("kb", Path.of("doc.md")));
+    }
+
+    @Test
+    void enabledDeleteReturnsTrueWhenProcessSucceeds() {
+        PythonRagBridgeProperties properties = enabledProperties();
+        properties.setPythonArgs(List.of("-version"));
+        PythonRagIngestionClient client = new PythonRagIngestionClient(properties);
+
+        assertTrue(client.delete("kb", Path.of("doc.md")));
     }
 
     @Test
