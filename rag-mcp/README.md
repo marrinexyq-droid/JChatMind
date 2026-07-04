@@ -67,3 +67,20 @@ ingestion/query MVP.
 
 Version 1.3 adds a guarded Java bridge that can call the MCP stdio tool layer
 behind `rag.python-bridge.enabled`, with the legacy Java RAG path as fallback.
+
+Version 1.4 adds a local management dashboard layer for browsing indexed
+collections, chunks, ingestion/query traces, and the latest offline evaluation
+JSON report.
+
+Validate dashboard inputs without Streamlit:
+
+```bash
+python scripts/start_dashboard.py --check
+```
+
+Start the optional Streamlit dashboard:
+
+```bash
+pip install -e .[dashboard]
+python scripts/start_dashboard.py
+```

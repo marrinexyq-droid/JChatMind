@@ -10,6 +10,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+dashboard = [
+  "streamlit>=1.36",
+]
 eval = [
   "ragas==0.4.3",
   "langchain-community==0.3.31",
