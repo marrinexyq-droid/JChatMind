@@ -80,6 +80,12 @@ Set `rerank_backend: noop` for traced pass-through reranking, or
 `reranker_timeout_seconds` in `config/settings.yaml`. Query traces record rerank
 success and fallback details.
 
+Version 1.6 adds a guarded Java ingestion bridge. When
+`rag.python-bridge.ingestion-enabled=true`, Java document uploads invoke
+`rag-mcp/scripts/ingest.py <file> --collection <kbId>` so the Python index can be
+kept warm before query cutover. The bridge remains disabled and fail-open by
+default.
+
 Validate dashboard inputs without Streamlit:
 
 ```bash

@@ -13,12 +13,15 @@ import java.util.List;
 @ConfigurationProperties(prefix = "rag.python-bridge")
 public class PythonRagBridgeProperties {
     private boolean enabled = false;
+    private boolean ingestionEnabled = false;
     private String projectRoot = "../rag-mcp";
     private String pythonExecutable = "python";
     private List<String> pythonArgs = new ArrayList<>();
     private long timeoutMs = 8000;
+    private long ingestionTimeoutMs = 30000;
     private boolean fallbackOnError = true;
     private boolean fallbackOnEmpty = true;
+    private boolean failOnIngestionError = false;
 
     public Path resolvedProjectRoot() {
         return Path.of(projectRoot).toAbsolutePath().normalize();

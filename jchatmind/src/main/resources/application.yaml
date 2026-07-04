@@ -54,12 +54,15 @@ reranker:
 rag:
   python-bridge:
     enabled: false
+    ingestion-enabled: false
     project-root: ../rag-mcp
     python-executable: python
     python-args: []
     timeout-ms: 8000
+    ingestion-timeout-ms: 30000
     fallback-on-error: true
     fallback-on-empty: true
+    fail-on-ingestion-error: false
   self-rag:
     enabled: true
     min-final-chunks: 2

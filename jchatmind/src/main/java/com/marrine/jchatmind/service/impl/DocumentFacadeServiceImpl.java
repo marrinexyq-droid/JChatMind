@@ -47,6 +47,7 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
     private final RagService ragService;
     private final ChunkBgeM3Mapper chunkBgeM3Mapper;
     private final GraphRagService graphRagService;
+    private final PythonRagIngestionClient pythonRagIngestionClient;
 
     @Override
     public GetDocumentsResponse getDocuments() {
@@ -161,6 +162,9 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
             updatedDocument.setUpdatedAt(now);
 
             documentMapper.updateById(updatedDocument);
+            if (pythonRagIngestionClient.isEnabled()) {
+                pythonRagIngestionClient.ingest(kbId, documentStorageService.getFilePath(filePath));
+            }
 
             log.info("文档上传成功: kbId={}, documentId={}, filename={}", kbId, documentId, originalFilename);
 
