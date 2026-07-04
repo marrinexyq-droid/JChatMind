@@ -18,6 +18,8 @@ retrieval:
   default_top_k: 5
   candidate_pool_size: 20
   rerank_backend: none
+  reranker_base_url: http://127.0.0.1:8001
+  reranker_timeout_seconds: 8.0
 
 evaluation:
   baseline_report: ../jchatmind/reranker-service/rag_eval/output/rag_eval_report.md

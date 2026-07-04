@@ -72,6 +72,14 @@ Version 1.4 adds a local management dashboard layer for browsing indexed
 collections, chunks, ingestion/query traces, and the latest offline evaluation
 JSON report.
 
+Version 1.5 adds a Python-side reranker seam for `hybrid-rerank`. The default
+configuration keeps `rerank_backend: none`, preserving local offline behavior.
+Set `rerank_backend: noop` for traced pass-through reranking, or
+`rerank_backend: http` to call the existing FastAPI reranker-compatible
+`/rerank` service, controlled by `reranker_base_url` and
+`reranker_timeout_seconds` in `config/settings.yaml`. Query traces record rerank
+success and fallback details.
+
 Validate dashboard inputs without Streamlit:
 
 ```bash

@@ -26,6 +26,8 @@ class RetrievalSettings(BaseModel):
     default_top_k: int = 5
     candidate_pool_size: int = 20
     rerank_backend: str = "none"
+    reranker_base_url: str = "http://127.0.0.1:8001"
+    reranker_timeout_seconds: float = 8.0
 
 
 class EvaluationSettings(BaseModel):

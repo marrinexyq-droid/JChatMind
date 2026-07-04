@@ -8,6 +8,7 @@ from typing import Any, TextIO
 from src.core.query_engine import QueryEngine
 from src.core.settings import Settings
 from src.libs.embeddings import HashEmbeddingProvider
+from src.libs.rerankers import build_reranker
 from src.mcp_server.tools import KnowledgeHub, ToolPayload
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
@@ -128,8 +129,14 @@ def build_local_hub(project_root: Path) -> KnowledgeHub:
         vector_store=vector_store,
         sparse_index=sparse_index,
         embedding_provider=provider,
+        reranker=build_reranker(
+            settings.retrieval.rerank_backend,
+            base_url=settings.retrieval.reranker_base_url,
+            timeout_seconds=settings.retrieval.reranker_timeout_seconds,
+        ),
         trace_writer=JsonlTraceWriter(project_root / settings.storage.traces_path),
         rrf_k=settings.retrieval.rrf_k,
+        candidate_pool_size=settings.retrieval.candidate_pool_size,
     )
     return KnowledgeHub(query_engine=engine, vector_store=vector_store)
 

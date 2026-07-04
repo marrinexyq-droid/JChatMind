@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from src.core.types import RetrievalResult, SearchRequest
 from src.libs.embeddings import BaseEmbeddingProvider
 from src.libs.fusion import reciprocal_rank_fusion
+from src.libs.rerankers import BaseReranker
 from src.observability.trace_context import TraceContext
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
@@ -23,14 +24,18 @@ class QueryEngine:
         vector_store: SqliteVectorStore | None = None,
         sparse_index: SqliteSparseIndex | None = None,
         embedding_provider: BaseEmbeddingProvider | None = None,
+        reranker: BaseReranker | None = None,
         trace_writer: JsonlTraceWriter | None = None,
         rrf_k: int = 60,
+        candidate_pool_size: int = 20,
     ):
         self.vector_store = vector_store
         self.sparse_index = sparse_index
         self.embedding_provider = embedding_provider
+        self.reranker = reranker
         self.trace_writer = trace_writer
         self.rrf_k = rrf_k
+        self.candidate_pool_size = candidate_pool_size
 
     def search(self, request: SearchRequest) -> SearchResponse:
         trace = TraceContext(
@@ -47,6 +52,10 @@ class QueryEngine:
             self._write_trace(trace)
             return response
 
+        retrieval_limit = request.top_k
+        if request.mode == "hybrid-rerank":
+            retrieval_limit = max(request.top_k, self.candidate_pool_size)
+
         dense: list[RetrievalResult] = []
         sparse: list[RetrievalResult] = []
         if self.vector_store is not None and self.embedding_provider is not None:
@@ -54,32 +63,65 @@ class QueryEngine:
             dense = self.vector_store.similarity_search(
                 request.collection,
                 query_embedding,
-                request.top_k,
+                retrieval_limit,
             )
             trace.record_stage(
                 "dense_retrieval",
                 method=self.vector_store.__class__.__name__,
-                details={"count": len(dense)},
+                details={"count": len(dense), "limit": retrieval_limit},
             )
         if self.sparse_index is not None and request.mode in {"hybrid", "hybrid-rerank"}:
-            sparse = self.sparse_index.search(request.collection, request.query, request.top_k)
+            sparse = self.sparse_index.search(
+                request.collection,
+                request.query,
+                retrieval_limit,
+            )
             trace.record_stage(
                 "sparse_retrieval",
                 method=self.sparse_index.__class__.__name__,
-                details={"count": len(sparse)},
+                details={"count": len(sparse), "limit": retrieval_limit},
             )
 
         if request.mode == "vector":
             results = dense[: request.top_k]
         elif dense and sparse:
-            results = reciprocal_rank_fusion([dense, sparse], request.top_k, self.rrf_k)
+            results = reciprocal_rank_fusion([dense, sparse], retrieval_limit, self.rrf_k)
             trace.record_stage(
                 "fusion",
                 method="reciprocal_rank_fusion",
-                details={"count": len(results), "rrf_k": self.rrf_k},
+                details={"count": len(results), "rrf_k": self.rrf_k, "limit": retrieval_limit},
             )
         else:
-            results = (dense or sparse)[: request.top_k]
+            results = (dense or sparse)[:retrieval_limit]
+
+        if request.mode == "hybrid-rerank":
+            if self.reranker is not None and results:
+                candidate_count = len(results)
+                try:
+                    results = self.reranker.rerank(request.query, results, request.top_k)
+                    trace.record_stage(
+                        "rerank",
+                        method=self.reranker.__class__.__name__,
+                        details={
+                            "candidate_count": candidate_count,
+                            "selected_count": len(results),
+                            "fallback": False,
+                        },
+                    )
+                except Exception as exc:
+                    trace.record_stage(
+                        "rerank",
+                        method=self.reranker.__class__.__name__,
+                        details={
+                            "candidate_count": candidate_count,
+                            "selected_count": min(candidate_count, request.top_k),
+                            "fallback": True,
+                            "error": str(exc),
+                        },
+                    )
+                    results = results[: request.top_k]
+            else:
+                results = results[: request.top_k]
 
         cited = [
             RetrievalResult(

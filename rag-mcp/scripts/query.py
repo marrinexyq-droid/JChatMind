@@ -11,6 +11,7 @@ from src.core.query_engine import QueryEngine
 from src.core.settings import Settings
 from src.core.types import SearchRequest
 from src.libs.embeddings import HashEmbeddingProvider
+from src.libs.rerankers import build_reranker
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
 from src.storage.vector_store import SqliteVectorStore
@@ -32,8 +33,14 @@ def main() -> int:
         vector_store=SqliteVectorStore(PROJECT_ROOT / settings.storage.vector_store_db),
         sparse_index=SqliteSparseIndex(PROJECT_ROOT / settings.storage.bm25_path),
         embedding_provider=HashEmbeddingProvider(),
+        reranker=build_reranker(
+            settings.retrieval.rerank_backend,
+            base_url=settings.retrieval.reranker_base_url,
+            timeout_seconds=settings.retrieval.reranker_timeout_seconds,
+        ),
         trace_writer=JsonlTraceWriter(PROJECT_ROOT / settings.storage.traces_path),
         rrf_k=settings.retrieval.rrf_k,
+        candidate_pool_size=settings.retrieval.candidate_pool_size,
     )
     response = engine.search(
         SearchRequest(
