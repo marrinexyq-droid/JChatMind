@@ -98,6 +98,11 @@ Version 1.8 adds a guarded bridge readiness layer. Python exposes
 cutover. Spring Actuator health reports the bridge as disabled without spawning
 Python when both bridge flags are off.
 
+Version 1.9 adds a development canary cutover profile. Start the Java app with
+`--spring.profiles.active=rag-canary` to enable Python query and ingestion bridge
+flags with legacy fallback and MCP readiness gating. The default profile remains
+fully disabled.
+
 Validate dashboard inputs without Streamlit:
 
 ```bash

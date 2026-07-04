@@ -1,0 +1,19 @@
+spring:
+  config:
+    activate:
+      on-profile: rag-canary
+
+management:
+  endpoint:
+    health:
+      show-details: always
+
+rag:
+  python-bridge:
+    enabled: true
+    ingestion-enabled: true
+    readiness-gate-enabled: true
+    readiness-cache-ttl-ms: 15000
+    fallback-on-error: true
+    fallback-on-empty: true
+    fail-on-ingestion-error: false

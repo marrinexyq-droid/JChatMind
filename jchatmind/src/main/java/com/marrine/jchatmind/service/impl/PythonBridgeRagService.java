@@ -1,6 +1,7 @@
 package com.marrine.jchatmind.service.impl;
 
 import com.marrine.jchatmind.config.PythonRagBridgeProperties;
+import com.marrine.jchatmind.model.vo.PythonRagBridgeReadiness;
 import com.marrine.jchatmind.model.vo.QueryPlan;
 import com.marrine.jchatmind.model.vo.RagSearchResult;
 import com.marrine.jchatmind.model.vo.ScoredChunk;
@@ -21,6 +22,7 @@ public class PythonBridgeRagService implements RagService {
     private final RagServiceImpl legacyRagService;
     private final PythonRagMcpClient pythonRagMcpClient;
     private final PythonRagBridgeProperties properties;
+    private volatile ReadinessCache readinessCache = ReadinessCache.expired();
 
     @Override
     public float[] embed(String text) {
@@ -57,6 +59,14 @@ public class PythonBridgeRagService implements RagService {
             return legacyRagService.hybridSearchWithTrace(kbId, queryPlan);
         }
 
+        if (properties.isReadinessGateEnabled() && !isPythonBridgeReady()) {
+            log.warn("Python RAG MCP readiness gate is not ready; falling back to Java RAG for kbId={}", kbId);
+            if (properties.isFallbackOnError()) {
+                return legacyRagService.hybridSearchWithTrace(kbId, queryPlan);
+            }
+            return RagSearchResult.builder().chunks(List.of()).build();
+        }
+
         Optional<RagSearchResult> pythonResult = pythonRagMcpClient.search(kbId, queryPlan);
         if (pythonResult.isPresent()) {
             RagSearchResult result = pythonResult.get();
@@ -78,5 +88,26 @@ public class PythonBridgeRagService implements RagService {
     @Override
     public void ensureIndexes() {
         legacyRagService.ensureIndexes();
+    }
+
+    private boolean isPythonBridgeReady() {
+        long now = System.currentTimeMillis();
+        ReadinessCache cached = readinessCache;
+        if (cached.expiresAtMs() > now) {
+            return cached.ready();
+        }
+
+        boolean ready = pythonRagMcpClient.checkReadiness()
+                .map(PythonRagBridgeReadiness::isReady)
+                .orElse(false);
+        long ttlMs = Math.max(0, properties.getReadinessCacheTtlMs());
+        readinessCache = new ReadinessCache(ready, now + ttlMs);
+        return ready;
+    }
+
+    private record ReadinessCache(boolean ready, long expiresAtMs) {
+        static ReadinessCache expired() {
+            return new ReadinessCache(false, 0);
+        }
     }
 }

@@ -19,6 +19,8 @@ public class PythonRagBridgeProperties {
     private List<String> pythonArgs = new ArrayList<>();
     private long timeoutMs = 8000;
     private long ingestionTimeoutMs = 30000;
+    private boolean readinessGateEnabled = false;
+    private long readinessCacheTtlMs = 15000;
     private boolean fallbackOnError = true;
     private boolean fallbackOnEmpty = true;
     private boolean failOnIngestionError = false;
