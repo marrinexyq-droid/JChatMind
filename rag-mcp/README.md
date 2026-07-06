@@ -118,6 +118,17 @@ Version 2.1 wires the canary into Java's `rag-canary` profile. When
 `scripts/canary_smoke.py` before accepting canary traffic and fails fast when
 `canary-preflight-fail-on-error=true`.
 
+Version 2.2 adds a combined acceptance gate:
+
+```bash
+python scripts/canary_acceptance.py --ragas-rounds 3 --output-json output/metrics/canary_acceptance_report.json
+```
+
+The acceptance gate runs the isolated canary smoke harness, repeats the offline
+RAGAS battle evaluation, records SHA-256 hashes for each round, and fails when
+the case inventory or target retrieval metrics drop below the configured
+thresholds. Use `--skip-smoke` for fast metric-only checks.
+
 Validate dashboard inputs without Streamlit:
 
 ```bash
