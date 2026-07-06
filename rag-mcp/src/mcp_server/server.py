@@ -88,7 +88,7 @@ class JsonRpcMcpServer:
             return {
                 "protocolVersion": str(params.get("protocolVersion", "2024-11-05")),
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "jchatmind-rag-mcp", "version": "1.8.0"},
+                "serverInfo": {"name": "jchatmind-rag-mcp", "version": "2.0.0"},
             }
         if method == "tools/list":
             return {"tools": TOOL_SCHEMAS}

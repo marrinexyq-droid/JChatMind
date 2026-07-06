@@ -103,6 +103,16 @@ Version 1.9 adds a development canary cutover profile. Start the Java app with
 flags with legacy fallback and MCP readiness gating. The default profile remains
 fully disabled.
 
+Version 2.0 adds an isolated canary smoke harness:
+
+```bash
+python scripts/canary_smoke.py
+```
+
+The canary creates a temporary `rag-mcp` project root, ingests a sample document,
+checks MCP readiness, queries `query_knowledge_hub`, verifies document summary
+and traces, prints a JSON report, and removes the temporary data by default.
+
 Validate dashboard inputs without Streamlit:
 
 ```bash
