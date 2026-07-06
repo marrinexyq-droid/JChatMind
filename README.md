@@ -197,3 +197,15 @@ GOOGLE_GENAI_TEMPERATURE=0.7
 GOOGLE_GENAI_MAX_OUTPUT_TOKENS=2048
 GOOGLE_GENAI_TIMEOUT_MILLIS=30000
 ```
+
+## RAG Canary Verification
+
+Run the project-level RAG canary gate from the repository root:
+
+```bash
+python scripts/verify_rag_canary.py --acceptance-rounds 3
+```
+
+The verifier runs `rag-mcp` Python tests, the multi-round canary acceptance
+gate, and Java bridge tests. GitHub Actions runs the same command in
+`.github/workflows/rag-canary-acceptance.yml`.

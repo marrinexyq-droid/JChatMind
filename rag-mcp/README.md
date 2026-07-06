@@ -129,6 +129,15 @@ RAGAS battle evaluation, records SHA-256 hashes for each round, and fails when
 the case inventory or target retrieval metrics drop below the configured
 thresholds. Use `--skip-smoke` for fast metric-only checks.
 
+Version 2.3 exposes the same flow at the repository root for local and CI use:
+
+```bash
+python scripts/verify_rag_canary.py --acceptance-rounds 3
+```
+
+The root verifier runs Python tests, the canary acceptance gate, and Java bridge
+tests, then returns a JSON report with per-step status.
+
 Validate dashboard inputs without Streamlit:
 
 ```bash
