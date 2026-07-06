@@ -14,6 +14,10 @@ rag:
     ingestion-enabled: true
     readiness-gate-enabled: true
     readiness-cache-ttl-ms: 15000
+    canary-preflight-enabled: true
+    canary-preflight-fail-on-error: true
+    canary-preflight-timeout-ms: 30000
+    canary-preflight-collection: java-rag-canary
     fallback-on-error: true
     fallback-on-empty: true
     fail-on-ingestion-error: false

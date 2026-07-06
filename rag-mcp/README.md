@@ -113,6 +113,11 @@ The canary creates a temporary `rag-mcp` project root, ingests a sample document
 checks MCP readiness, queries `query_knowledge_hub`, verifies document summary
 and traces, prints a JSON report, and removes the temporary data by default.
 
+Version 2.1 wires the canary into Java's `rag-canary` profile. When
+`rag.python-bridge.canary-preflight-enabled=true`, JChatMind runs
+`scripts/canary_smoke.py` before accepting canary traffic and fails fast when
+`canary-preflight-fail-on-error=true`.
+
 Validate dashboard inputs without Streamlit:
 
 ```bash

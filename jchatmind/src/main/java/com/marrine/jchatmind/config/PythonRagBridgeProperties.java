@@ -21,6 +21,10 @@ public class PythonRagBridgeProperties {
     private long ingestionTimeoutMs = 30000;
     private boolean readinessGateEnabled = false;
     private long readinessCacheTtlMs = 15000;
+    private boolean canaryPreflightEnabled = false;
+    private boolean canaryPreflightFailOnError = false;
+    private long canaryPreflightTimeoutMs = 30000;
+    private String canaryPreflightCollection = "java-rag-canary";
     private boolean fallbackOnError = true;
     private boolean fallbackOnEmpty = true;
     private boolean failOnIngestionError = false;
