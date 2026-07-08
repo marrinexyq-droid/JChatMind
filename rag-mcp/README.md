@@ -31,7 +31,20 @@ python scripts/evaluate_ragas_cases.py --output-json output/metrics/ragas_cases_
 ```
 
 The offline evaluator computes retrieval metrics from the strict JSONL dataset.
-LLM-judged RAGAS metrics such as faithfulness require a configured judge model.
+LLM-judged RAGAS metrics such as faithfulness and answer relevancy run through
+the judged gate:
+
+```bash
+python scripts/evaluate_ragas_judged.py --mock-judge --limit 5 --output-json output/metrics/ragas_judged_report.json
+```
+
+`--mock-judge` is deterministic and is intended for harness stability checks.
+For a real judge-model gate, set `RAGAS_JUDGE_PROVIDER`, `RAGAS_JUDGE_MODEL`,
+and `RAGAS_JUDGE_API_KEY`; Google/Gemini can also use `GOOGLE_API_KEY` with the
+default `gemini-2.5-flash` model. Secrets are read only from environment
+variables. Use `--answer-policy generated` once evaluated answers are written
+into `ragas_cases.combined.jsonl`; the default `reference` policy is a wiring
+smoke test for the judge harness.
 
 Ingest a Markdown document:
 
@@ -147,6 +160,16 @@ python ../scripts/rag_cutover_readiness.py --allow-not-ready
 The report compares the current repository against the original replacement
 success criteria and lists blockers before Python RAG can become the default
 canonical implementation.
+
+Version 2.5 adds a configurable judge-model RAGAS gate:
+
+```bash
+python scripts/evaluate_ragas_judged.py --mock-judge --limit 5
+```
+
+The gate reports faithfulness and answer relevancy over answer-generation cases.
+Remote judging is configured through environment variables only, with
+`GOOGLE_API_KEY` supported for the Gemini default.
 
 Validate dashboard inputs without Streamlit:
 

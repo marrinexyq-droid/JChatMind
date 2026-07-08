@@ -217,5 +217,8 @@ python scripts/rag_cutover_readiness.py --allow-not-ready
 ```
 
 This readiness report is expected to stay `not_ready` until Java RAG internals
-are deprecated or removed, Chroma is canonical, and judge-model RAGAS gates are
-configured.
+are deprecated or removed and Chroma is canonical. The Python subsystem also
+includes a judge-model RAGAS gate for faithfulness and answer relevancy; run
+`python rag-mcp/scripts/evaluate_ragas_judged.py --mock-judge --limit 5` from
+the repository root for a deterministic wiring check, or configure
+`RAGAS_JUDGE_*`/`GOOGLE_API_KEY` for a real model judge.
