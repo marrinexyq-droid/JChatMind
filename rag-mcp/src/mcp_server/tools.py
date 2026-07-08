@@ -5,7 +5,7 @@ from typing import Any
 
 from src.core.query_engine import QueryEngine
 from src.core.types import RetrievalMode, SearchRequest
-from src.storage.vector_store import SqliteVectorStore
+from src.storage.vector_store import VectorStore
 
 
 @dataclass(frozen=True)
@@ -15,7 +15,7 @@ class ToolPayload:
 
 
 class KnowledgeHub:
-    def __init__(self, query_engine: QueryEngine, vector_store: SqliteVectorStore):
+    def __init__(self, query_engine: QueryEngine, vector_store: VectorStore):
         self.query_engine = query_engine
         self.vector_store = vector_store
 

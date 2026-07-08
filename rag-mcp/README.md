@@ -12,6 +12,13 @@ Run tests:
 python -m pytest -q
 ```
 
+Install the canonical Chroma vector backend when you want to run without the
+local SQLite fallback:
+
+```bash
+pip install -e .[chroma]
+```
+
 Run evaluation environment check:
 
 ```bash
@@ -72,8 +79,9 @@ Version 1.0 is complete when tests pass and the evaluation script reports whethe
 the existing Java RAG baseline report and the optional `ragas` package are
 available in the local environment.
 
-Version 1.1 adds an offline ingestion/query MVP using deterministic local
-embeddings, SQLite vector storage, SQLite sparse search, and hybrid fusion.
+Version 1.1 added the original offline ingestion/query MVP using deterministic
+local embeddings, SQLite vector storage, SQLite sparse search, and hybrid
+fusion. SQLite vector storage is now a legacy fallback.
 
 Version 1.2 adds a minimal MCP-compatible stdio tool layer over the local
 ingestion/query MVP.
@@ -170,6 +178,26 @@ python scripts/evaluate_ragas_judged.py --mock-judge --limit 5
 The gate reports faithfulness and answer relevancy over answer-generation cases.
 Remote judging is configured through environment variables only, with
 `GOOGLE_API_KEY` supported for the Gemini default.
+
+Version 2.6 makes Chroma the canonical dense vector store:
+
+```yaml
+storage:
+  vector_store_backend: chroma
+  sqlite_fallback_when_chroma_unavailable: true
+  chroma_path: data/db/chroma
+```
+
+CLI, MCP, canary, and dashboard construction now go through one vector store
+factory. In local environments without `chromadb`, the default config falls back
+to the legacy SQLite vector store so offline tests and canary smoke checks still
+run. Production installs should include `rag-mcp[chroma]` and run the strict
+runtime gate:
+
+```bash
+python scripts/canary_smoke.py --require-chroma
+python scripts/canary_acceptance.py --require-chroma --ragas-rounds 3
+```
 
 Validate dashboard inputs without Streamlit:
 

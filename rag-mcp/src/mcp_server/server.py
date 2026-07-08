@@ -12,7 +12,7 @@ from src.libs.rerankers import build_reranker
 from src.mcp_server.tools import KnowledgeHub, ToolPayload
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
-from src.storage.vector_store import SqliteVectorStore
+from src.storage.vector_store import build_vector_store
 
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
@@ -130,7 +130,7 @@ class JsonRpcMcpServer:
 def build_local_hub(project_root: Path) -> KnowledgeHub:
     settings = Settings.load(project_root / "config/settings.yaml")
     provider = HashEmbeddingProvider()
-    vector_store = SqliteVectorStore(project_root / settings.storage.vector_store_db)
+    vector_store = build_vector_store(project_root, settings.storage)
     sparse_index = SqliteSparseIndex(project_root / settings.storage.bm25_path)
     engine = QueryEngine(
         vector_store=vector_store,

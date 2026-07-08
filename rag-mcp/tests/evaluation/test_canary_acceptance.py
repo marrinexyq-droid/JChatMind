@@ -39,7 +39,7 @@ def test_run_acceptance_reports_failed_threshold_without_throwing():
 
 
 def test_run_acceptance_reports_smoke_failure_without_throwing(monkeypatch):
-    def fail_smoke(_collection):
+    def fail_smoke(_collection, *, require_chroma):
         raise AssertionError("smoke failed")
 
     monkeypatch.setattr("scripts.canary_acceptance._run_smoke_canary", fail_smoke)
@@ -54,6 +54,23 @@ def test_run_acceptance_reports_smoke_failure_without_throwing(monkeypatch):
         if gate["status"] == "failed"
     }
     assert "canary_smoke" in failed_gates
+
+
+def test_run_acceptance_can_require_chroma_runtime(monkeypatch):
+    def fallback_smoke(_collection, *, require_chroma):
+        return {"vector_store": {"actual_backend": "SqliteVectorStore"}}
+
+    monkeypatch.setattr("scripts.canary_acceptance._run_smoke_canary", fallback_smoke)
+
+    report = run_acceptance(ragas_rounds=1, require_chroma=True)
+
+    assert report["status"] == "failed"
+    failed_gates = {
+        gate["name"]
+        for gate in report["gates"]
+        if gate["status"] == "failed"
+    }
+    assert "chroma_vector_store_runtime" in failed_gates
 
 
 def test_canary_acceptance_cli_writes_json(tmp_path):

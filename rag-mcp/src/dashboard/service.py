@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from src.core.settings import Settings
+from src.storage.vector_store import build_vector_store
 
 
 @dataclass(frozen=True)
@@ -106,56 +106,34 @@ class DashboardService:
         )
 
     def list_collections(self) -> list[CollectionSummary]:
-        db_path = self._resolve(self.settings.storage.vector_store_db)
-        if not db_path.exists():
-            return []
-        with self._connect_readonly(db_path) as conn:
-            try:
-                rows = conn.execute(
-                    """
-                    SELECT collection, COUNT(DISTINCT document_id), COUNT(*)
-                    FROM chunks
-                    GROUP BY collection
-                    ORDER BY collection
-                    """
-                ).fetchall()
-            except sqlite3.Error:
-                return []
+        chunks = self._vector_store_chunks()
+        grouped: dict[str, set[str]] = {}
+        chunk_counts: dict[str, int] = {}
+        for chunk in chunks:
+            grouped.setdefault(chunk.collection, set()).add(chunk.document_id)
+            chunk_counts[chunk.collection] = chunk_counts.get(chunk.collection, 0) + 1
         return [
             CollectionSummary(
-                name=str(collection),
-                document_count=int(document_count),
-                chunk_count=int(chunk_count),
+                name=collection,
+                document_count=len(grouped[collection]),
+                chunk_count=chunk_counts[collection],
             )
-            for collection, document_count, chunk_count in rows
+            for collection in sorted(grouped)
         ]
 
     def list_documents(self, collection: str | None = None) -> list[DocumentSummary]:
-        db_path = self._resolve(self.settings.storage.vector_store_db)
-        if not db_path.exists():
-            return []
-        query = """
-            SELECT document_id, collection, COUNT(*), MIN(metadata_json)
-            FROM chunks
-        """
-        params: tuple[Any, ...] = ()
-        if collection is not None:
-            query += " WHERE collection = ?"
-            params = (collection,)
-        query += " GROUP BY document_id, collection ORDER BY collection, document_id"
-        with self._connect_readonly(db_path) as conn:
-            try:
-                rows = conn.execute(query, params).fetchall()
-            except sqlite3.Error:
-                return []
+        chunks = self._vector_store_chunks(collection)
+        grouped: dict[tuple[str, str], list[Any]] = {}
+        for chunk in chunks:
+            grouped.setdefault((chunk.collection, chunk.document_id), []).append(chunk)
         documents: list[DocumentSummary] = []
-        for document_id, row_collection, chunk_count, metadata_json in rows:
-            metadata = _loads_json_object(metadata_json)
+        for (row_collection, document_id), document_chunks in sorted(grouped.items()):
+            metadata = document_chunks[0].metadata
             documents.append(
                 DocumentSummary(
-                    document_id=str(document_id),
-                    collection=str(row_collection),
-                    chunk_count=int(chunk_count),
+                    document_id=document_id,
+                    collection=row_collection,
+                    chunk_count=len(document_chunks),
                     source_path=_string_or_none(metadata.get("source_path")),
                     title=_string_or_none(metadata.get("title")),
                 )
@@ -167,33 +145,18 @@ class DashboardService:
         collection: str | None = None,
         limit: int = 100,
     ) -> list[ChunkPreview]:
-        db_path = self._resolve(self.settings.storage.vector_store_db)
-        if not db_path.exists() or limit <= 0:
+        if limit <= 0:
             return []
-        query = """
-            SELECT chunk_id, document_id, collection, text, metadata_json
-            FROM chunks
-        """
-        params: tuple[Any, ...] = ()
-        if collection is not None:
-            query += " WHERE collection = ?"
-            params = (collection,)
-        query += " ORDER BY collection, document_id, chunk_id LIMIT ?"
-        params = (*params, limit)
-        with self._connect_readonly(db_path) as conn:
-            try:
-                rows = conn.execute(query, params).fetchall()
-            except sqlite3.Error:
-                return []
+        chunks = self._vector_store_chunks(collection)[:limit]
         return [
             ChunkPreview(
-                chunk_id=str(chunk_id),
-                document_id=str(document_id),
-                collection=str(row_collection),
-                text_preview=_preview_text(str(text)),
-                metadata=_loads_json_object(metadata_json),
+                chunk_id=chunk.id,
+                document_id=chunk.document_id,
+                collection=chunk.collection,
+                text_preview=_preview_text(chunk.text),
+                metadata=chunk.metadata,
             )
-            for chunk_id, document_id, row_collection, text, metadata_json in rows
+            for chunk in chunks
         ]
 
     def list_traces(
@@ -292,9 +255,9 @@ class DashboardService:
             return path
         return self.project_root / path
 
-    @staticmethod
-    def _connect_readonly(path: Path) -> sqlite3.Connection:
-        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    def _vector_store_chunks(self, collection: str | None = None) -> list[Any]:
+        store = build_vector_store(self.project_root, self.settings.storage)
+        return store.list_chunks(collection)
 
 
 def _preview_text(text: str, limit: int = 180) -> str:

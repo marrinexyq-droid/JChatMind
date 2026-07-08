@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from src.core.types import ChunkRecord
 from src.dashboard.service import DashboardService
 from src.libs.embeddings import HashEmbeddingProvider
@@ -76,15 +77,44 @@ def test_dashboard_check_script_does_not_require_streamlit(tmp_path):
     assert "collections=1" in result.stdout
 
 
-def write_settings(project_root: Path) -> Path:
+def test_dashboard_service_surfaces_vector_store_backend_errors(monkeypatch, tmp_path):
+    settings_path = write_settings(
+        tmp_path,
+        vector_store_backend="chroma",
+        sqlite_fallback_when_chroma_unavailable=False,
+    )
+
+    from src.storage import vector_store as vector_store_module
+
+    original_import_module = vector_store_module.importlib.import_module
+
+    def fail_import(name: str):
+        if name == "chromadb":
+            raise ModuleNotFoundError(name)
+        return original_import_module(name)
+
+    monkeypatch.setattr(vector_store_module.importlib, "import_module", fail_import)
+
+    with pytest.raises(Exception, match="chromadb is not installed"):
+        DashboardService(settings_path).overview()
+
+
+def write_settings(
+    project_root: Path,
+    *,
+    vector_store_backend: str = "sqlite",
+    sqlite_fallback_when_chroma_unavailable: bool = False,
+) -> Path:
     config_dir = project_root / "config"
     config_dir.mkdir()
     settings_path = config_dir / "settings.yaml"
     settings_path.write_text(
-        """
+        f"""
 app_name: rag-mcp-test
 
 storage:
+  vector_store_backend: {vector_store_backend}
+  sqlite_fallback_when_chroma_unavailable: {str(sqlite_fallback_when_chroma_unavailable).lower()}
   chroma_path: data/db/chroma
   vector_store_db: data/db/vector_store.db
   bm25_path: data/db/bm25

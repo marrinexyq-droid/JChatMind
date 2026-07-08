@@ -8,7 +8,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-VERSION = "2.4"
+VERSION = "2.6"
 
 
 def evaluate_readiness(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
@@ -185,20 +185,41 @@ def check_java_rag_retired(repo_root: Path) -> dict[str, Any]:
 
 def check_chroma_canonical(repo_root: Path) -> dict[str, Any]:
     pyproject = read_text(repo_root / "rag-mcp/pyproject.toml").lower()
-    storage_files = "\n".join(
-        read_text(path).lower()
-        for path in [
-            repo_root / "rag-mcp/src/storage/vector_store.py",
-            repo_root / "rag-mcp/src/core/settings.py",
-        ]
+    vector_store = read_text(repo_root / "rag-mcp/src/storage/vector_store.py")
+    settings_model = read_text(repo_root / "rag-mcp/src/core/settings.py").lower()
+    settings_yaml = read_text(repo_root / "rag-mcp/config/settings.yaml").lower()
+    canary_smoke = read_text(repo_root / "rag-mcp/scripts/canary_smoke.py")
+    canary_acceptance = read_text(repo_root / "rag-mcp/scripts/canary_acceptance.py")
+    has_dependency = "chromadb" in pyproject
+    has_adapter = "class ChromaVectorStore" in vector_store
+    has_factory = "def build_vector_store" in vector_store
+    default_backend = "vector_store_backend: chroma" in settings_yaml
+    modeled_backend = "vector_store_backend" in settings_model
+    strict_smoke_gate = "--require-chroma" in canary_smoke and "require_chroma" in canary_smoke
+    strict_acceptance_gate = (
+        "--require-chroma" in canary_acceptance
+        and "chroma_vector_store_runtime" in canary_acceptance
     )
-    has_chroma = "chromadb" in pyproject or "chroma" in storage_files and "sqlite" not in storage_files
+    has_chroma = (
+        has_dependency
+        and has_adapter
+        and has_factory
+        and default_backend
+        and modeled_backend
+        and strict_smoke_gate
+        and strict_acceptance_gate
+    )
     return check(
         name="chroma_is_canonical_vector_store",
         status="passed" if has_chroma else "blocked",
         evidence={
-            "pyproject_mentions_chromadb": "chromadb" in pyproject,
-            "storage_mentions_sqlite": "sqlite" in storage_files,
+            "pyproject_mentions_chromadb": has_dependency,
+            "chroma_vector_store_adapter": has_adapter,
+            "vector_store_factory": has_factory,
+            "default_backend_chroma": default_backend,
+            "settings_model_backend": modeled_backend,
+            "strict_canary_chroma_gate": strict_smoke_gate,
+            "strict_acceptance_chroma_gate": strict_acceptance_gate,
         },
         next_action=(
             "Add the Chroma adapter and make it the canonical dense vector store, "

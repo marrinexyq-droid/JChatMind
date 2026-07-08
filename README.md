@@ -217,8 +217,11 @@ python scripts/rag_cutover_readiness.py --allow-not-ready
 ```
 
 This readiness report is expected to stay `not_ready` until Java RAG internals
-are deprecated or removed and Chroma is canonical. The Python subsystem also
-includes a judge-model RAGAS gate for faithfulness and answer relevancy; run
+are deprecated or removed and the default Spring profile delegates to Python.
+The Python subsystem now includes a Chroma-backed canonical vector store path
+with a local SQLite fallback, plus strict `--require-chroma` canary gates for
+production runtime verification. It also includes a judge-model RAGAS gate for
+faithfulness and answer relevancy. Run
 `python rag-mcp/scripts/evaluate_ragas_judged.py --mock-judge --limit 5` from
 the repository root for a deterministic wiring check, or configure
 `RAGAS_JUDGE_*`/`GOOGLE_API_KEY` for a real model judge.

@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 
 class StorageSettings(BaseModel):
+    vector_store_backend: str = "chroma"
+    sqlite_fallback_when_chroma_unavailable: bool = True
     chroma_path: str
     vector_store_db: str = "data/db/vector_store.db"
     bm25_path: str

@@ -31,6 +31,7 @@ def run_acceptance(
     gate_mode: str = "hybrid-rerank",
     min_mrr: float = 0.95,
     min_precision_at_1: float = 0.90,
+    require_chroma: bool = False,
 ) -> dict[str, Any]:
     if ragas_rounds < 1:
         raise ValueError("ragas_rounds must be at least 1")
@@ -39,7 +40,7 @@ def run_acceptance(
     canary_error = None
     if run_smoke:
         try:
-            canary_report = _run_smoke_canary(collection)
+            canary_report = _run_smoke_canary(collection, require_chroma=require_chroma)
         except Exception as exc:
             canary_error = str(exc)
     ragas_reports = [
@@ -56,6 +57,7 @@ def run_acceptance(
         gate_mode=gate_mode,
         min_mrr=min_mrr,
         min_precision_at_1=min_precision_at_1,
+        require_chroma=require_chroma,
     )
 
     if output_json is not None:
@@ -85,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gate-mode", default="hybrid-rerank")
     parser.add_argument("--min-mrr", type=float, default=0.95)
     parser.add_argument("--min-precision-at-1", type=float, default=0.90)
+    parser.add_argument("--require-chroma", action="store_true")
     args = parser.parse_args(argv)
 
     report = run_acceptance(
@@ -98,15 +101,16 @@ def main(argv: list[str] | None = None) -> int:
         gate_mode=args.gate_mode,
         min_mrr=args.min_mrr,
         min_precision_at_1=args.min_precision_at_1,
+        require_chroma=args.require_chroma,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if report["status"] == "passed" else 1
 
 
-def _run_smoke_canary(collection: str) -> dict[str, Any]:
+def _run_smoke_canary(collection: str, *, require_chroma: bool) -> dict[str, Any]:
     workdir = Path(tempfile.mkdtemp(prefix="rag-mcp-acceptance-"))
     try:
-        return run_canary(workdir, collection=collection)
+        return run_canary(workdir, collection=collection, require_chroma=require_chroma)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
@@ -131,6 +135,7 @@ def _build_report(
     gate_mode: str,
     min_mrr: float,
     min_precision_at_1: float,
+    require_chroma: bool,
 ) -> dict[str, Any]:
     first_report = ragas_reports[0]["report"]
     hashes = [row["sha256"] for row in ragas_reports]
@@ -156,6 +161,19 @@ def _build_report(
             observed=f"{gate_run_id}/{gate_mode}",
         ),
     ]
+    if require_chroma:
+        actual_backend = None
+        if canary_report is not None:
+            actual_backend = (canary_report.get("vector_store") or {}).get("actual_backend")
+        gates.append(
+            _gate(
+                "chroma_vector_store_runtime",
+                actual_backend == "ChromaVectorStore",
+                observed=actual_backend or canary_error,
+                threshold="ChromaVectorStore",
+                skipped=smoke_skipped,
+            )
+        )
     if target_metric is not None:
         gates.extend(
             [

@@ -1,6 +1,8 @@
 app_name: rag-mcp
 
 storage:
+  vector_store_backend: chroma
+  sqlite_fallback_when_chroma_unavailable: true
   chroma_path: data/db/chroma
   vector_store_db: data/db/vector_store.db
   bm25_path: data/db/bm25

@@ -17,7 +17,7 @@ from src.libs.embeddings import HashEmbeddingProvider
 from src.mcp_server.server import JsonRpcMcpServer, build_local_hub
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
-from src.storage.vector_store import SqliteVectorStore
+from src.storage.vector_store import build_vector_store
 
 
 REQUIRED_TOOLS = {
@@ -28,7 +28,12 @@ REQUIRED_TOOLS = {
 }
 
 
-def run_canary(project_root: Path, collection: str = "canary") -> dict[str, Any]:
+def run_canary(
+    project_root: Path,
+    collection: str = "canary",
+    *,
+    require_chroma: bool = False,
+) -> dict[str, Any]:
     project_root = project_root.resolve()
     _ensure_empty_project_root(project_root)
     _prepare_project_root(project_root)
@@ -43,9 +48,16 @@ def run_canary(project_root: Path, collection: str = "canary") -> dict[str, Any]
     )
 
     provider = HashEmbeddingProvider()
+    vector_store = build_vector_store(project_root, settings.storage)
+    actual_backend = vector_store.__class__.__name__
+    if require_chroma and actual_backend != "ChromaVectorStore":
+        raise AssertionError(
+            "canary requires ChromaVectorStore but resolved "
+            f"{actual_backend}; install rag-mcp[chroma] or disable fallback"
+        )
     pipeline = IngestionPipeline(
         history_db=project_root / settings.storage.ingestion_history_db,
-        vector_store=SqliteVectorStore(project_root / settings.storage.vector_store_db),
+        vector_store=vector_store,
         sparse_index=SqliteSparseIndex(project_root / settings.storage.bm25_path),
         embedding_provider=provider,
         trace_writer=JsonlTraceWriter(project_root / settings.storage.traces_path),
@@ -112,6 +124,11 @@ def run_canary(project_root: Path, collection: str = "canary") -> dict[str, Any]
         "collection": collection,
         "document_id": ingestion.document_id,
         "chunk_count": ingestion.chunk_count,
+        "vector_store": {
+            "configured_backend": settings.storage.vector_store_backend,
+            "actual_backend": actual_backend,
+            "chroma_required": require_chroma,
+        },
         "mcp": {
             "server_name": initialize["result"]["serverInfo"]["name"],
             "server_version": initialize["result"]["serverInfo"]["version"],
@@ -139,22 +156,35 @@ def main() -> int:
     parser.add_argument("--collection", default="canary")
     parser.add_argument("--workdir", type=Path)
     parser.add_argument("--keep-workdir", action="store_true")
+    parser.add_argument("--require-chroma", action="store_true")
     args = parser.parse_args()
 
     if args.workdir is not None:
-        report = run_canary(args.workdir, collection=args.collection)
+        report = run_canary(
+            args.workdir,
+            collection=args.collection,
+            require_chroma=args.require_chroma,
+        )
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
 
     if args.keep_workdir:
         workdir = Path(tempfile.mkdtemp(prefix="rag-mcp-canary-"))
-        report = run_canary(workdir, collection=args.collection)
+        report = run_canary(
+            workdir,
+            collection=args.collection,
+            require_chroma=args.require_chroma,
+        )
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
 
     workdir = Path(tempfile.mkdtemp(prefix="rag-mcp-canary-"))
     try:
-        report = run_canary(workdir, collection=args.collection)
+        report = run_canary(
+            workdir,
+            collection=args.collection,
+            require_chroma=args.require_chroma,
+        )
         print(json.dumps(report, ensure_ascii=False, indent=2))
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -169,6 +199,8 @@ def _prepare_project_root(project_root: Path) -> None:
 app_name: rag-mcp-canary
 
 storage:
+  vector_store_backend: chroma
+  sqlite_fallback_when_chroma_unavailable: true
   chroma_path: data/db/chroma
   vector_store_db: data/db/vector_store.db
   bm25_path: data/db/bm25

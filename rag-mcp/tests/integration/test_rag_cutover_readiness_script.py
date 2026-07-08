@@ -69,8 +69,19 @@ rag:
 """,
         )
         write(root, "rag-mcp/pyproject.toml", 'dependencies = ["chromadb>=0.5", "ragas==0.4.3"]')
-        write(root, "rag-mcp/src/storage/vector_store.py", "class ChromaVectorStore: pass")
-        write(root, "rag-mcp/src/core/settings.py", "chroma_path = 'data/db/chroma'")
+        write(
+            root,
+            "rag-mcp/src/storage/vector_store.py",
+            "class ChromaVectorStore: pass\ndef build_vector_store(): pass",
+        )
+        write(root, "rag-mcp/src/core/settings.py", "vector_store_backend = 'chroma'")
+        write(root, "rag-mcp/config/settings.yaml", "storage:\n  vector_store_backend: chroma\n")
+        write(root, "rag-mcp/scripts/canary_smoke.py", "--require-chroma\nrequire_chroma")
+        write(
+            root,
+            "rag-mcp/scripts/canary_acceptance.py",
+            "--require-chroma\nchroma_vector_store_runtime",
+        )
         write(root, "rag-mcp/scripts/evaluate_ragas_judged.py")
         write(root, "rag-mcp/src/libs/vision.py", "class BaseVisionLLM: pass")
         write(root, "rag-mcp/README.md", "faithfulness and answer relevancy")

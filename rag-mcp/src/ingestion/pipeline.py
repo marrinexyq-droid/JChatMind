@@ -10,7 +10,7 @@ from src.libs.embeddings import BaseEmbeddingProvider
 from src.observability.trace_context import TraceContext
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
-from src.storage.vector_store import SqliteVectorStore
+from src.storage.vector_store import VectorStore
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class IngestionPipeline:
     def __init__(
         self,
         history_db: Path,
-        vector_store: SqliteVectorStore,
+        vector_store: VectorStore,
         sparse_index: SqliteSparseIndex,
         embedding_provider: BaseEmbeddingProvider,
         loader: MarkdownLoader | None = None,
@@ -105,7 +105,7 @@ class IngestionPipeline:
             self.sparse_index.upsert_chunks(chunks)
             trace.record_stage(
                 "upsert",
-                method="sqlite",
+                method=self.vector_store.__class__.__name__,
                 details={"chunk_count": len(chunks)},
             )
             self.integrity_store.mark_success(
@@ -140,7 +140,7 @@ class IngestionPipeline:
         history_deleted = self.integrity_store.delete(source_path, collection)
         trace.record_stage(
             "delete",
-            method="sqlite",
+            method=self.vector_store.__class__.__name__,
             details={
                 "vector_chunks_deleted": vector_deleted,
                 "sparse_chunks_deleted": sparse_deleted,

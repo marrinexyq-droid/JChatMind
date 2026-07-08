@@ -9,7 +9,7 @@ from src.libs.rerankers import BaseReranker
 from src.observability.trace_context import TraceContext
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
-from src.storage.vector_store import SqliteVectorStore
+from src.storage.vector_store import VectorStore
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ class SearchResponse:
 class QueryEngine:
     def __init__(
         self,
-        vector_store: SqliteVectorStore | None = None,
+        vector_store: VectorStore | None = None,
         sparse_index: SqliteSparseIndex | None = None,
         embedding_provider: BaseEmbeddingProvider | None = None,
         reranker: BaseReranker | None = None,

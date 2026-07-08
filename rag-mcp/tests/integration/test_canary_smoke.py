@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+import scripts.canary_smoke as canary_smoke
 from scripts.canary_smoke import run_canary
 
 
@@ -18,8 +20,26 @@ def test_run_canary_uses_isolated_project_root(tmp_path):
     assert report["summary"]["chunk_count"] >= 1
     assert report["traces"]["ingestion"] >= 1
     assert report["traces"]["query"] >= 1
-    assert (tmp_path / "data/db/vector_store.db").exists()
+    assert report["vector_store"]["configured_backend"] == "chroma"
+    if report["vector_store"]["actual_backend"] == "ChromaVectorStore":
+        assert (tmp_path / "data/db/chroma").exists()
+    else:
+        assert (tmp_path / "data/db/vector_store.db").exists()
     assert (tmp_path / "logs/traces.jsonl").exists()
+
+
+def test_run_canary_require_chroma_rejects_fallback(monkeypatch, tmp_path):
+    class FakeFallbackStore:
+        pass
+
+    monkeypatch.setattr(
+        canary_smoke,
+        "build_vector_store",
+        lambda _project_root, _storage: FakeFallbackStore(),
+    )
+
+    with pytest.raises(AssertionError, match="requires ChromaVectorStore"):
+        run_canary(tmp_path, collection="canary-test", require_chroma=True)
 
 
 def test_canary_smoke_cli_outputs_json_report(tmp_path):

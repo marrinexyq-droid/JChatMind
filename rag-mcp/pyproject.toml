@@ -10,6 +10,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+chroma = [
+  "chromadb>=0.5,<1.0",
+]
 dashboard = [
   "streamlit>=1.36",
 ]

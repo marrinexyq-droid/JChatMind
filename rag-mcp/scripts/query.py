@@ -14,7 +14,7 @@ from src.libs.embeddings import HashEmbeddingProvider
 from src.libs.rerankers import build_reranker
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
-from src.storage.vector_store import SqliteVectorStore
+from src.storage.vector_store import build_vector_store
 
 
 def main() -> int:
@@ -30,7 +30,7 @@ def main() -> int:
 
     settings = Settings.load(PROJECT_ROOT / "config/settings.yaml")
     engine = QueryEngine(
-        vector_store=SqliteVectorStore(PROJECT_ROOT / settings.storage.vector_store_db),
+        vector_store=build_vector_store(PROJECT_ROOT, settings.storage),
         sparse_index=SqliteSparseIndex(PROJECT_ROOT / settings.storage.bm25_path),
         embedding_provider=HashEmbeddingProvider(),
         reranker=build_reranker(

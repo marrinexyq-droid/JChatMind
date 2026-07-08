@@ -12,7 +12,7 @@ from src.ingestion.pipeline import IngestionPipeline
 from src.libs.embeddings import HashEmbeddingProvider
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
-from src.storage.vector_store import SqliteVectorStore
+from src.storage.vector_store import build_vector_store
 
 
 def main() -> int:
@@ -24,7 +24,7 @@ def main() -> int:
     settings = Settings.load(PROJECT_ROOT / "config/settings.yaml")
     pipeline = IngestionPipeline(
         history_db=PROJECT_ROOT / settings.storage.ingestion_history_db,
-        vector_store=SqliteVectorStore(PROJECT_ROOT / settings.storage.vector_store_db),
+        vector_store=build_vector_store(PROJECT_ROOT, settings.storage),
         sparse_index=SqliteSparseIndex(PROJECT_ROOT / settings.storage.bm25_path),
         embedding_provider=HashEmbeddingProvider(),
         trace_writer=JsonlTraceWriter(PROJECT_ROOT / settings.storage.traces_path),
