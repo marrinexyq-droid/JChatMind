@@ -138,6 +138,16 @@ python scripts/verify_rag_canary.py --acceptance-rounds 3
 The root verifier runs Python tests, the canary acceptance gate, and Java bridge
 tests, then returns a JSON report with per-step status.
 
+Version 2.4 adds a production cutover readiness report:
+
+```bash
+python ../scripts/rag_cutover_readiness.py --allow-not-ready
+```
+
+The report compares the current repository against the original replacement
+success criteria and lists blockers before Python RAG can become the default
+canonical implementation.
+
 Validate dashboard inputs without Streamlit:
 
 ```bash

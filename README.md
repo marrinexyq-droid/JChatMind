@@ -209,3 +209,13 @@ python scripts/verify_rag_canary.py --acceptance-rounds 3
 The verifier runs `rag-mcp` Python tests, the multi-round canary acceptance
 gate, and Java bridge tests. GitHub Actions runs the same command in
 `.github/workflows/rag-canary-acceptance.yml`.
+
+Check whether the project is ready to make Python RAG the default canonical path:
+
+```bash
+python scripts/rag_cutover_readiness.py --allow-not-ready
+```
+
+This readiness report is expected to stay `not_ready` until Java RAG internals
+are deprecated or removed, Chroma is canonical, and judge-model RAGAS gates are
+configured.
