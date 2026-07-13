@@ -53,6 +53,26 @@ class SqliteSparseIndex:
                     deleted += 1
         return deleted
 
+    def has_source_path(self, collection: str, source_path: str) -> bool:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT metadata_json
+                FROM chunk_fts
+                WHERE collection = ?
+                """,
+                (collection,),
+            ).fetchall()
+        return any(
+            _loads_json_object(metadata_json).get("source_path") == source_path
+            for (metadata_json,) in rows
+        )
+
+    def is_empty(self) -> bool:
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM chunk_fts").fetchone()
+        return row is not None and row[0] == 0
+
     def search(self, collection: str, query: str, top_k: int) -> list[RetrievalResult]:
         terms = _query_terms(query)
         if not terms:

@@ -104,12 +104,66 @@ class FileIntegrityStore:
                 )
         return cursor.rowcount > 0
 
+    def mark_index_dirty(
+        self,
+        source_path: Path,
+        collection: str,
+        embedding_fingerprint: str,
+        error: str,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO local_index_integrity (
+                    scope, embedding_fingerprint, source_path, collection, error, updated_at
+                ) VALUES ('local', ?, ?, ?, ?, ?)
+                ON CONFLICT(scope) DO UPDATE SET
+                    embedding_fingerprint = excluded.embedding_fingerprint,
+                    source_path = excluded.source_path,
+                    collection = excluded.collection,
+                    error = excluded.error,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    embedding_fingerprint,
+                    str(source_path),
+                    collection,
+                    error,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
+    def has_dirty_index(self) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM local_index_integrity WHERE scope = 'local'"
+            ).fetchone()
+        return row is not None
+
+    def clear_dirty_index_after_explicit_cleanup(self) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM local_index_integrity WHERE scope = 'local'")
+
     def require_collection_compatible(
         self,
         collection: str,
         embedding_fingerprint: str,
     ) -> None:
         with self._connect() as conn:
+            dirty = conn.execute(
+                """
+                SELECT embedding_fingerprint, source_path, collection
+                FROM local_index_integrity
+                WHERE scope = 'local'
+                """
+            ).fetchone()
+            if dirty is not None:
+                raise ReindexRequiredError(
+                    "the local index may contain residual vectors from a failed ingestion "
+                    f"for collection '{dirty[2]}'; re-index required: explicitly delete every "
+                    "document in the local index, then ingest all sources with the current "
+                    "embedding configuration"
+                )
             fingerprints = {
                 str(row[0])
                 for row in conn.execute(
@@ -220,6 +274,18 @@ class FileIntegrityStore:
                 CREATE TABLE IF NOT EXISTS collection_embedding_fingerprints (
                     collection TEXT PRIMARY KEY,
                     embedding_fingerprint TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS local_index_integrity (
+                    scope TEXT PRIMARY KEY,
+                    embedding_fingerprint TEXT NOT NULL,
+                    source_path TEXT NOT NULL,
+                    collection TEXT NOT NULL,
+                    error TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
                 """

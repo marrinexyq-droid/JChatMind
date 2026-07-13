@@ -21,6 +21,36 @@ class StaticEmbeddingProvider(BaseEmbeddingProvider):
         return self.fingerprint
 
 
+class FailingSparseIndex(SqliteSparseIndex):
+    def __init__(self, db_path, fail_cleanup: bool = False):
+        super().__init__(db_path)
+        self.fail_cleanup = fail_cleanup
+        self.fail_upsert = True
+        self.upsert_failed = False
+
+    def upsert_chunks(self, chunks):
+        if not self.fail_upsert:
+            return super().upsert_chunks(chunks)
+        self.upsert_failed = True
+        raise RuntimeError("sparse upsert failed")
+
+    def delete_by_source_path(self, collection: str, source_path: str) -> int:
+        if self.upsert_failed and self.fail_cleanup:
+            raise RuntimeError("sparse rollback delete failed")
+        return super().delete_by_source_path(collection, source_path)
+
+
+class FailingLoader:
+    def load(self, source_path, collection):
+        raise RuntimeError("document load failed")
+
+
+class PartiallyFailingVectorStore(SqliteVectorStore):
+    def upsert_chunks(self, chunks, embeddings):
+        super().upsert_chunks(chunks, embeddings)
+        raise RuntimeError("dense upsert failed after a partial write")
+
+
 def test_ingestion_pipeline_skips_unchanged_and_query_returns_evidence(tmp_path):
     source = tmp_path / "rag.md"
     source.write_text(
@@ -82,6 +112,55 @@ def test_reingesting_changed_file_replaces_old_chunks(tmp_path):
     assert "Old retrieval" not in chunks[0].text
 
 
+def test_pre_write_failure_preserves_existing_successful_chunks(tmp_path):
+    source = tmp_path / "rag.md"
+    source.write_text("# Old\n\nOld retrieval text.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    provider = HashEmbeddingProvider(dimensions=64)
+    IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=provider,
+    ).run(source, collection="docs")
+    source.write_text("# New\n\nNew retrieval text.", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="document load failed"):
+        IngestionPipeline(
+            history_db=history_db,
+            vector_store=vector_store,
+            sparse_index=sparse_index,
+            embedding_provider=provider,
+            loader=FailingLoader(),
+        ).run(source, collection="docs")
+
+    chunks = vector_store.list_chunks("docs")
+    assert len(chunks) == 1
+    assert "Old retrieval" in chunks[0].text
+    assert sparse_index.search("docs", "Old retrieval", top_k=1)
+
+
+def test_partial_dense_upsert_failure_rolls_back_current_source_chunks(tmp_path):
+    source = tmp_path / "rag.md"
+    source.write_text("# Atomicity\n\nPartial dense writes must be removed.", encoding="utf-8")
+    vector_store = PartiallyFailingVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    pipeline = IngestionPipeline(
+        history_db=tmp_path / "history.db",
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=HashEmbeddingProvider(dimensions=64),
+    )
+
+    with pytest.raises(RuntimeError, match="dense upsert failed after a partial write"):
+        pipeline.run(source, collection="docs")
+
+    assert vector_store.list_chunks("docs") == []
+    assert sparse_index.search("docs", "partial dense", top_k=1) == []
+
+
 def test_deleting_ingested_file_removes_indexes_and_history(tmp_path):
     source = tmp_path / "rag.md"
     source.write_text("# Delete Me\n\nTemporary retrieval text.", encoding="utf-8")
@@ -107,6 +186,106 @@ def test_deleting_ingested_file_removes_indexes_and_history(tmp_path):
     assert second.status == "not_found"
     assert vector_store.list_chunks("docs") == []
     assert sparse_index.search("docs", "temporary retrieval", 3) == []
+
+
+@pytest.mark.parametrize("backend", ("sqlite", "chroma"))
+def test_sparse_upsert_failure_rolls_back_dense_chunks_and_prevents_old_dimension_zero_scores(
+    tmp_path, backend
+):
+    source = tmp_path / "rag.md"
+    source.write_text("# Atomicity\n\nThe dense write must not outlive a sparse failure.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    if backend == "chroma":
+        pytest.importorskip("chromadb")
+        vector_store = ChromaVectorStore(tmp_path / "chroma")
+    else:
+        vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = FailingSparseIndex(tmp_path / "sparse.db")
+    current_provider = StaticEmbeddingProvider(
+        "provider=ollama;model=current;dimensions=3", [1.0, 0.0, 0.0]
+    )
+    old_provider = StaticEmbeddingProvider(
+        "provider=hash;model=old;dimensions=2", [1.0, 0.0]
+    )
+    pipeline = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=current_provider,
+    )
+
+    with pytest.raises(RuntimeError, match="sparse upsert failed"):
+        pipeline.run(source, collection="docs")
+
+    assert vector_store.list_chunks("docs") == []
+    assert sparse_index.search("docs", "dense sparse failure", top_k=3) == []
+
+    response = QueryEngine(
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=old_provider,
+        history_db=history_db,
+    ).search(SearchRequest(query="dense sparse failure", collection="docs", top_k=1, mode="vector"))
+
+    assert response.results == []
+
+
+def test_failed_rollback_persists_a_dirty_index_gate_for_every_dense_provider(tmp_path):
+    source = tmp_path / "rag.md"
+    source.write_text("# Dirty Index\n\nRollback failure requires explicit reindexing.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = FailingSparseIndex(tmp_path / "sparse.db", fail_cleanup=True)
+    current_provider = StaticEmbeddingProvider(
+        "provider=ollama;model=current;dimensions=3", [1.0, 0.0, 0.0]
+    )
+    old_provider = StaticEmbeddingProvider(
+        "provider=hash;model=old;dimensions=2", [1.0, 0.0]
+    )
+    pipeline = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=current_provider,
+    )
+
+    with pytest.raises(RuntimeError, match="sparse upsert failed"):
+        pipeline.run(source, collection="docs")
+
+    for provider in (current_provider, old_provider):
+        engine = QueryEngine(
+            vector_store=vector_store,
+            sparse_index=sparse_index,
+            embedding_provider=provider,
+            history_db=history_db,
+        )
+        with pytest.raises(ReindexRequiredError, match="re-index required"):
+            engine.search(SearchRequest(query="dirty", collection="docs", top_k=1, mode="vector"))
+
+
+def test_explicit_delete_of_an_empty_dirty_index_allows_a_clean_rebuild(tmp_path):
+    source = tmp_path / "rag.md"
+    source.write_text("# Dirty Index\n\nExplicit deletion permits rebuilding.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = FailingSparseIndex(tmp_path / "sparse.db", fail_cleanup=True)
+    provider = StaticEmbeddingProvider(
+        "provider=ollama;model=current;dimensions=3", [1.0, 0.0, 0.0]
+    )
+    pipeline = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=provider,
+    )
+
+    with pytest.raises(RuntimeError, match="sparse upsert failed"):
+        pipeline.run(source, collection="docs")
+
+    sparse_index.fail_cleanup = False
+    sparse_index.fail_upsert = False
+    assert pipeline.delete(source, collection="docs").status == "deleted"
+    assert pipeline.run(source, collection="docs").status == "ingested"
 
 
 @pytest.mark.parametrize("backend", ("sqlite", "chroma"))
