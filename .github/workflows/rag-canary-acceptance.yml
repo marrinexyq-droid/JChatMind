@@ -44,9 +44,7 @@ jobs:
         run: chmod +x jchatmind/mvnw
 
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e rag-mcp
+        run: python -m pip install -r rag-mcp/requirements-ci.lock
 
       - name: Run RAG canary verification
         run: |

@@ -8,8 +8,13 @@ ingestion and query implementation.
 
 Run tests:
 
-```bash
-python -m pytest -q
+Python 3.11 is required for the locked all-extras environment. Select it
+explicitly on a new checkout, especially on Windows where Python 3.12 would
+require local MSVC build tools for `chroma-hnswlib`:
+
+```powershell
+uv sync --python 3.11 --frozen --all-extras --group dev
+uv run pytest -q
 ```
 
 Install the canonical Chroma vector backend when you want to run without the
