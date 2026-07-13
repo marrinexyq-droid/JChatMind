@@ -7,7 +7,7 @@ from typing import Any, TextIO
 
 from src.core.query_engine import QueryEngine
 from src.core.settings import Settings
-from src.libs.embeddings import HashEmbeddingProvider
+from src.libs.embedding_factory import build_embedding_provider
 from src.libs.rerankers import build_reranker
 from src.mcp_server.tools import KnowledgeHub, ToolPayload
 from src.observability.trace_writer import JsonlTraceWriter
@@ -129,7 +129,7 @@ class JsonRpcMcpServer:
 
 def build_local_hub(project_root: Path) -> KnowledgeHub:
     settings = Settings.load(project_root / "config/settings.yaml")
-    provider = HashEmbeddingProvider()
+    provider = build_embedding_provider(settings.embedding)
     vector_store = build_vector_store(project_root, settings.storage)
     sparse_index = SqliteSparseIndex(project_root / settings.storage.bm25_path)
     engine = QueryEngine(

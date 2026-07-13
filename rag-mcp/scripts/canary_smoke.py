@@ -13,7 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.settings import Settings
 from src.ingestion.pipeline import IngestionPipeline
-from src.libs.embeddings import HashEmbeddingProvider
+from src.libs.embedding_factory import build_embedding_provider
 from src.mcp_server.server import JsonRpcMcpServer, build_local_hub
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
@@ -47,7 +47,7 @@ def run_canary(
         encoding="utf-8",
     )
 
-    provider = HashEmbeddingProvider()
+    provider = build_embedding_provider(settings.embedding)
     vector_store = build_vector_store(project_root, settings.storage)
     actual_backend = vector_store.__class__.__name__
     if require_chroma and actual_backend != "ChromaVectorStore":

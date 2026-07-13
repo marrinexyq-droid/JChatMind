@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import scripts.canary_smoke as canary_smoke
+from src.libs.embeddings import HashEmbeddingProvider
 from scripts.canary_smoke import run_canary
 
 
@@ -40,6 +41,27 @@ def test_run_canary_require_chroma_rejects_fallback(monkeypatch, tmp_path):
 
     with pytest.raises(AssertionError, match="requires ChromaVectorStore"):
         run_canary(tmp_path, collection="canary-test", require_chroma=True)
+
+
+def test_run_canary_uses_its_explicit_hash_embedding_settings(monkeypatch, tmp_path):
+    observed = []
+
+    def fake_build_provider(settings):
+        observed.append(settings)
+        return HashEmbeddingProvider()
+
+    monkeypatch.setattr(
+        canary_smoke,
+        "build_embedding_provider",
+        fake_build_provider,
+        raising=False,
+    )
+
+    run_canary(tmp_path, collection="canary-test")
+
+    assert [(settings.provider, settings.model, settings.base_url) for settings in observed] == [
+        ("hash", "hash", "")
+    ]
 
 
 def test_canary_smoke_cli_outputs_json_report(tmp_path):

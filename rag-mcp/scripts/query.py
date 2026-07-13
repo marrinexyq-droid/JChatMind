@@ -10,7 +10,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.core.query_engine import QueryEngine
 from src.core.settings import Settings
 from src.core.types import SearchRequest
-from src.libs.embeddings import HashEmbeddingProvider
+from src.libs.embedding_factory import build_embedding_provider
 from src.libs.rerankers import build_reranker
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
@@ -32,7 +32,7 @@ def main() -> int:
     engine = QueryEngine(
         vector_store=build_vector_store(PROJECT_ROOT, settings.storage),
         sparse_index=SqliteSparseIndex(PROJECT_ROOT / settings.storage.bm25_path),
-        embedding_provider=HashEmbeddingProvider(),
+        embedding_provider=build_embedding_provider(settings.embedding),
         reranker=build_reranker(
             settings.retrieval.rerank_backend,
             base_url=settings.retrieval.reranker_base_url,

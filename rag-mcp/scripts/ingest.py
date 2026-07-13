@@ -9,7 +9,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.settings import Settings
 from src.ingestion.pipeline import IngestionPipeline
-from src.libs.embeddings import HashEmbeddingProvider
+from src.libs.embedding_factory import build_embedding_provider
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
 from src.storage.vector_store import build_vector_store
@@ -26,7 +26,7 @@ def main() -> int:
         history_db=PROJECT_ROOT / settings.storage.ingestion_history_db,
         vector_store=build_vector_store(PROJECT_ROOT, settings.storage),
         sparse_index=SqliteSparseIndex(PROJECT_ROOT / settings.storage.bm25_path),
-        embedding_provider=HashEmbeddingProvider(),
+        embedding_provider=build_embedding_provider(settings.embedding),
         trace_writer=JsonlTraceWriter(PROJECT_ROOT / settings.storage.traces_path),
     )
     result = pipeline.run(args.source, collection=args.collection)
