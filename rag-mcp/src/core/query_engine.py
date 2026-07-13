@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.core.types import RetrievalResult, SearchRequest
-from src.ingestion.integrity import FileIntegrityStore
+from src.ingestion.integrity import FileIntegrityStore, ReindexRequiredError
 from src.libs.embeddings import BaseEmbeddingProvider
 from src.libs.fusion import reciprocal_rank_fusion
 from src.libs.rerankers import BaseReranker
@@ -35,6 +35,11 @@ class QueryEngine:
         self.vector_store = vector_store
         self.sparse_index = sparse_index
         self.embedding_provider = embedding_provider
+        if vector_store is not None and embedding_provider is not None and history_db is None:
+            raise ReindexRequiredError(
+                "history_db is required for dense retrieval; re-index required to verify "
+                "local index integrity"
+            )
         self.integrity_store = FileIntegrityStore(history_db) if history_db is not None else None
         self.reranker = reranker
         self.trace_writer = trace_writer
@@ -63,12 +68,12 @@ class QueryEngine:
         dense: list[RetrievalResult] = []
         sparse: list[RetrievalResult] = []
         if self.vector_store is not None and self.embedding_provider is not None:
-            if self.integrity_store is not None:
-                self.integrity_store.require_collection_compatible(
-                    request.collection,
-                    self.embedding_provider.compatibility_fingerprint(),
-                )
-                self.vector_store.reset_if_empty(request.collection)
+            assert self.integrity_store is not None
+            self.integrity_store.require_collection_compatible(
+                request.collection,
+                self.embedding_provider.compatibility_fingerprint(),
+            )
+            self.vector_store.reset_if_empty(request.collection)
             query_embedding = self.embedding_provider.embed_text(request.query)
             dense = self.vector_store.similarity_search(
                 request.collection,

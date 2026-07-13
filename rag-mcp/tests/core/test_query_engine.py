@@ -1,13 +1,19 @@
 import json
 
+import pytest
+
 from src.core.query_engine import QueryEngine, _build_answer
 from src.core.types import RetrievalResult, SearchRequest
+from src.ingestion.integrity import ReindexRequiredError
 from src.observability.trace_writer import JsonlTraceWriter
 
 
 class FakeEmbeddingProvider:
     def embed_text(self, text: str) -> list[float]:
         return [1.0]
+
+    def compatibility_fingerprint(self) -> str:
+        return "provider=fake;model=test;dimensions=1"
 
 
 class FakeVectorStore:
@@ -23,6 +29,9 @@ class FakeVectorStore:
     ) -> list[RetrievalResult]:
         self.requested_top_k = top_k
         return self.results[:top_k]
+
+    def reset_if_empty(self, collection: str) -> None:
+        return None
 
 
 class FakeSparseIndex:
@@ -96,7 +105,7 @@ def test_query_answer_strips_bom_from_legacy_chunks():
     assert "[C1] # Title Body" in answer
 
 
-def test_hybrid_rerank_expands_candidate_pool_and_uses_reranker():
+def test_hybrid_rerank_expands_candidate_pool_and_uses_reranker(tmp_path):
     dense = [
         _result("c1", 0.9, "vector"),
         _result("c2", 0.8, "vector"),
@@ -116,6 +125,7 @@ def test_hybrid_rerank_expands_candidate_pool_and_uses_reranker():
         vector_store=vector_store,
         sparse_index=sparse_index,
         embedding_provider=FakeEmbeddingProvider(),
+        history_db=tmp_path / "history.db",
         reranker=reranker,
         candidate_pool_size=4,
     )
@@ -144,6 +154,7 @@ def test_hybrid_rerank_falls_back_to_fused_candidates_and_traces_error(tmp_path)
             [_result("c1", 0.9, "vector"), _result("c2", 0.8, "vector")]
         ),
         embedding_provider=FakeEmbeddingProvider(),
+        history_db=tmp_path / "history.db",
         reranker=FailingReranker(),
         trace_writer=JsonlTraceWriter(trace_path),
         candidate_pool_size=4,
@@ -164,6 +175,17 @@ def test_hybrid_rerank_falls_back_to_fused_candidates_and_traces_error(tmp_path)
     assert rerank_stage["details"]["fallback"] is True
     assert rerank_stage["details"]["candidate_count"] == 2
     assert "reranker unavailable" in rerank_stage["details"]["error"]
+
+
+def test_dense_retrieval_requires_an_integrity_store():
+    vector_store = FakeVectorStore([_result("c1", 1.0, "vector")])
+    with pytest.raises(ReindexRequiredError, match="history_db is required"):
+        QueryEngine(
+            vector_store=vector_store,
+            embedding_provider=FakeEmbeddingProvider(),
+        )
+
+    assert vector_store.requested_top_k is None
 
 
 def _result(chunk_id: str, score: float, source: str) -> RetrievalResult:

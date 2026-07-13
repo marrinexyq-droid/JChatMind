@@ -79,3 +79,29 @@ DONE
 - Provider/model changes now require an operator to explicitly delete all indexed sources across the local runtime and ingest them again. This is intentional: silent deletion or mixed embedding spaces would be unsafe.
 - Legacy history rows are conservatively treated as incompatible and require the same explicit rebuild.
 - If a rollback cannot be confirmed, dense retrieval remains unavailable until the operator explicitly empties the local indexes through document deletion. This is intentionally conservative because a partial write cannot safely be attributed to any embedding space.
+
+## Final atomicity remediation
+
+### Findings
+
+- A replacement deleted the old dense rows before deleting sparse rows, but armed compensation only before the new dense upsert. If the old sparse delete failed, the old sparse rows could remain queryable and no dirty-index gate was persisted.
+- `QueryEngine(history_db=None)` bypassed the dirty and compatibility checks altogether, allowing public dense callers to query a dirty local index directly.
+
+### Fixes
+
+- After loading, splitting, and embedding succeed, ingestion atomically inserts a persisted local dirty marker before deleting either old index representation. Every failure after that point compensates both indexes when possible and retains the marker, including old dense/sparse deletion, new dense/sparse write, history success, and marker-clear failures.
+- A successful ingest clears the dirty marker only after both index writes and the success-history write complete. The marker has a UUID operation owner, and the success cleanup deletes only a matching owner token; a second ingestion cannot arm while the local marker exists, so it cannot erase another unresolved gate.
+- Existing databases migrate `local_index_integrity` with a conservative empty owner token. Such legacy dirty rows remain gated until explicit verified cleanup.
+- Dense-capable `QueryEngine` construction now requires `history_db`; CLI and MCP already supply it, while test helpers were updated. Sparse-only configurations without a vector store and embedding provider remain usable without the integrity store.
+
+### Tests
+
+- RED: the focused integration/core/MCP suite failed in five expected places: partial dense and sparse write failures did not gate after successful compensation, old sparse pre-delete failure left evidence accessible, and dense query construction without history was allowed.
+- GREEN: `uv run pytest tests/integration/test_ingestion_query_flow.py tests/core/test_query_engine.py tests/mcp_server/test_server.py -q` passed with `26 passed`; complete `uv run pytest -q` passed with `106 passed in 16.31s`.
+- Added replacement sparse pre-delete coverage that proves both same and different embedding providers receive `re-index required`, plus a dirty index with no history DB cannot construct a dense query engine.
+- Existing partial dense/sparse failure tests still assert cleanup and now assert the retained gate; replacement success asserts its gate clears and returns new evidence; loader failure asserts old evidence remains available without a gate.
+
+### Risks
+
+- Public direct dense callers must now provide the same history database as ingestion. This is intentionally fail-closed: an omitted store cannot silently bypass dirty or compatibility checks.
+- There is no multi-process ingestion coordinator beyond the local SQLite integrity record. Its unique local marker serializes destructive replacement phases, and owner-token cleanup prevents one success from clearing another operation's marker. Explicit document deletion remains an operator-managed global cleanup action and should not be run concurrently with ingestion.

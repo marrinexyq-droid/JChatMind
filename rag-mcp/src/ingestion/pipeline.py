@@ -66,6 +66,11 @@ class IngestionPipeline:
             details={"sha256": digest},
         )
 
+        self.integrity_store.require_collection_compatible(
+            collection,
+            embedding_fingerprint,
+        )
+
         if self.integrity_store.should_skip(
             source_path,
             collection,
@@ -84,13 +89,9 @@ class IngestionPipeline:
             self._write_trace(trace)
             return result
 
-        self.integrity_store.require_collection_compatible(
-            collection,
-            embedding_fingerprint,
-        )
         self.vector_store.reset_if_empty(collection)
 
-        dense_write_attempted = False
+        dirty_marker_id: str | None = None
         try:
             document = self.loader.load(source_path, collection)
             trace.record_stage(
@@ -112,9 +113,13 @@ class IngestionPipeline:
                 method=self.embedding_provider.__class__.__name__,
                 details={"embedding_count": len(embeddings)},
             )
+            dirty_marker_id = self.integrity_store.arm_index_dirty(
+                source_path,
+                collection,
+                embedding_fingerprint,
+            )
             self.vector_store.delete_by_source_path(collection, document.source_path)
             self.sparse_index.delete_by_source_path(collection, document.source_path)
-            dense_write_attempted = True
             self.vector_store.upsert_chunks(chunks, embeddings)
             self.sparse_index.upsert_chunks(chunks)
             trace.record_stage(
@@ -130,6 +135,8 @@ class IngestionPipeline:
                 document_id=document.id,
                 chunk_count=len(chunks),
             )
+            if not self.integrity_store.clear_dirty_index_after_success(dirty_marker_id):
+                raise RuntimeError("the dirty-index marker is no longer owned by this ingestion")
             result = IngestionResult(
                 status="ingested",
                 document_id=document.id,
@@ -143,19 +150,15 @@ class IngestionPipeline:
         except Exception as exc:
             rollback_error = (
                 self._compensate_failed_write(source_path, collection)
-                if dense_write_attempted
+                if dirty_marker_id is not None
                 else None
             )
             failure_detail = str(exc)
             if rollback_error is not None:
                 failure_detail = f"{failure_detail}; rollback could not be confirmed: {rollback_error}"
+            if dirty_marker_id is not None:
                 try:
-                    self.integrity_store.mark_index_dirty(
-                        source_path,
-                        collection,
-                        embedding_fingerprint,
-                        failure_detail,
-                    )
+                    self.integrity_store.record_dirty_index_failure(dirty_marker_id, failure_detail)
                 except Exception as marker_error:
                     self._write_trace(
                         trace,

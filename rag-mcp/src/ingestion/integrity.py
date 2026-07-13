@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -104,34 +105,55 @@ class FileIntegrityStore:
                 )
         return cursor.rowcount > 0
 
-    def mark_index_dirty(
+    def arm_index_dirty(
         self,
         source_path: Path,
         collection: str,
         embedding_fingerprint: str,
-        error: str,
-    ) -> None:
+    ) -> str:
+        operation_id = uuid.uuid4().hex
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO local_index_integrity (
+                        scope, operation_id, embedding_fingerprint, source_path, collection, error,
+                        updated_at
+                    ) VALUES ('local', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        operation_id,
+                        embedding_fingerprint,
+                        str(source_path),
+                        collection,
+                        "replacement ingestion in progress",
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ReindexRequiredError(
+                "the local index is already being rebuilt or may contain residual vectors; "
+                "re-index required: explicitly delete every document in the local index, "
+                "then ingest all sources with the current embedding configuration"
+            ) from exc
+        return operation_id
+
+    def record_dirty_index_failure(self, operation_id: str, error: str) -> None:
         with self._connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
-                INSERT INTO local_index_integrity (
-                    scope, embedding_fingerprint, source_path, collection, error, updated_at
-                ) VALUES ('local', ?, ?, ?, ?, ?)
-                ON CONFLICT(scope) DO UPDATE SET
-                    embedding_fingerprint = excluded.embedding_fingerprint,
-                    source_path = excluded.source_path,
-                    collection = excluded.collection,
-                    error = excluded.error,
-                    updated_at = excluded.updated_at
+                UPDATE local_index_integrity
+                SET error = ?, updated_at = ?
+                WHERE scope = 'local' AND operation_id = ?
                 """,
                 (
-                    embedding_fingerprint,
-                    str(source_path),
-                    collection,
                     error,
                     datetime.now(timezone.utc).isoformat(),
+                    operation_id,
                 ),
             )
+        if cursor.rowcount != 1:
+            raise RuntimeError("the dirty-index marker is no longer owned by this ingestion")
 
     def has_dirty_index(self) -> bool:
         with self._connect() as conn:
@@ -139,6 +161,17 @@ class FileIntegrityStore:
                 "SELECT 1 FROM local_index_integrity WHERE scope = 'local'"
             ).fetchone()
         return row is not None
+
+    def clear_dirty_index_after_success(self, operation_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM local_index_integrity
+                WHERE scope = 'local' AND operation_id = ?
+                """,
+                (operation_id,),
+            )
+        return cursor.rowcount == 1
 
     def clear_dirty_index_after_explicit_cleanup(self) -> None:
         with self._connect() as conn:
@@ -282,6 +315,7 @@ class FileIntegrityStore:
                 """
                 CREATE TABLE IF NOT EXISTS local_index_integrity (
                     scope TEXT PRIMARY KEY,
+                    operation_id TEXT NOT NULL,
                     embedding_fingerprint TEXT NOT NULL,
                     source_path TEXT NOT NULL,
                     collection TEXT NOT NULL,
@@ -290,6 +324,15 @@ class FileIntegrityStore:
                 )
                 """
             )
+            integrity_columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(local_index_integrity)").fetchall()
+            }
+            if "operation_id" not in integrity_columns:
+                conn.execute(
+                    "ALTER TABLE local_index_integrity "
+                    "ADD COLUMN operation_id TEXT NOT NULL DEFAULT ''"
+                )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)

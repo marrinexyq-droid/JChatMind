@@ -34,6 +34,7 @@ def build_hub(tmp_path: Path) -> tuple[KnowledgeHub, str]:
         vector_store=vector_store,
         sparse_index=sparse_index,
         embedding_provider=provider,
+        history_db=tmp_path / "history.db",
     )
     return KnowledgeHub(engine, vector_store), str(result.document_id)
 

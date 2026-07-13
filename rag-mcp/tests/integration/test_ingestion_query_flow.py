@@ -2,7 +2,7 @@ import pytest
 
 from src.core.query_engine import QueryEngine
 from src.core.types import SearchRequest
-from src.ingestion.integrity import ReindexRequiredError
+from src.ingestion.integrity import FileIntegrityStore, ReindexRequiredError
 from src.ingestion.pipeline import IngestionPipeline
 from src.libs.embeddings import BaseEmbeddingProvider, HashEmbeddingProvider
 from src.storage.sparse_index import SqliteSparseIndex
@@ -37,6 +37,18 @@ class FailingSparseIndex(SqliteSparseIndex):
     def delete_by_source_path(self, collection: str, source_path: str) -> int:
         if self.upsert_failed and self.fail_cleanup:
             raise RuntimeError("sparse rollback delete failed")
+        return super().delete_by_source_path(collection, source_path)
+
+
+class FailingReplacementSparseIndex(SqliteSparseIndex):
+    def __init__(self, db_path):
+        super().__init__(db_path)
+        self.fail_next_delete = True
+
+    def delete_by_source_path(self, collection: str, source_path: str) -> int:
+        if self.fail_next_delete:
+            self.fail_next_delete = False
+            raise RuntimeError("old sparse delete failed")
         return super().delete_by_source_path(collection, source_path)
 
 
@@ -79,6 +91,7 @@ def test_ingestion_pipeline_skips_unchanged_and_query_returns_evidence(tmp_path)
         vector_store=vector_store,
         sparse_index=sparse_index,
         embedding_provider=provider,
+        history_db=tmp_path / "history.db",
     )
     response = engine.search(SearchRequest(query="BM25 keywords", collection="docs", top_k=3))
 
@@ -110,6 +123,17 @@ def test_reingesting_changed_file_replaces_old_chunks(tmp_path):
     assert len(chunks) == 1
     assert "New retrieval" in chunks[0].text
     assert "Old retrieval" not in chunks[0].text
+    assert FileIntegrityStore(tmp_path / "history.db").has_dirty_index() is False
+
+    response = QueryEngine(
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=provider,
+        history_db=tmp_path / "history.db",
+    ).search(SearchRequest(query="New retrieval", collection="docs", top_k=1, mode="hybrid"))
+
+    assert response.results
+    assert "New retrieval" in response.results[0].text
 
 
 def test_pre_write_failure_preserves_existing_successful_chunks(tmp_path):
@@ -140,18 +164,31 @@ def test_pre_write_failure_preserves_existing_successful_chunks(tmp_path):
     assert len(chunks) == 1
     assert "Old retrieval" in chunks[0].text
     assert sparse_index.search("docs", "Old retrieval", top_k=1)
+    assert FileIntegrityStore(history_db).has_dirty_index() is False
+
+    response = QueryEngine(
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=provider,
+        history_db=history_db,
+    ).search(SearchRequest(query="Old retrieval", collection="docs", top_k=1, mode="hybrid"))
+
+    assert response.results
+    assert "Old retrieval" in response.results[0].text
 
 
 def test_partial_dense_upsert_failure_rolls_back_current_source_chunks(tmp_path):
     source = tmp_path / "rag.md"
     source.write_text("# Atomicity\n\nPartial dense writes must be removed.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
     vector_store = PartiallyFailingVectorStore(tmp_path / "vectors.db")
     sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    provider = HashEmbeddingProvider(dimensions=64)
     pipeline = IngestionPipeline(
-        history_db=tmp_path / "history.db",
+        history_db=history_db,
         vector_store=vector_store,
         sparse_index=sparse_index,
-        embedding_provider=HashEmbeddingProvider(dimensions=64),
+        embedding_provider=provider,
     )
 
     with pytest.raises(RuntimeError, match="dense upsert failed after a partial write"):
@@ -159,6 +196,61 @@ def test_partial_dense_upsert_failure_rolls_back_current_source_chunks(tmp_path)
 
     assert vector_store.list_chunks("docs") == []
     assert sparse_index.search("docs", "partial dense", top_k=1) == []
+    with pytest.raises(ReindexRequiredError, match="re-index required"):
+        QueryEngine(
+            vector_store=vector_store,
+            sparse_index=sparse_index,
+            embedding_provider=provider,
+            history_db=history_db,
+        ).search(SearchRequest(query="partial dense", collection="docs", top_k=1, mode="vector"))
+
+
+def test_replacement_sparse_delete_failure_blocks_every_dense_provider(tmp_path):
+    source = tmp_path / "rag.md"
+    source.write_text("# Old\n\nOld sparse evidence must not leak.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_path = tmp_path / "sparse.db"
+    current_provider = StaticEmbeddingProvider(
+        "provider=hash;model=current;dimensions=2", [1.0, 0.0]
+    )
+    other_provider = StaticEmbeddingProvider(
+        "provider=ollama;model=other;dimensions=3", [1.0, 0.0, 0.0]
+    )
+    IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=SqliteSparseIndex(sparse_path),
+        embedding_provider=current_provider,
+    ).run(source, collection="docs")
+    source.write_text("# New\n\nNew replacement evidence.", encoding="utf-8")
+
+    failing_sparse = FailingReplacementSparseIndex(sparse_path)
+    with pytest.raises(RuntimeError, match="old sparse delete failed"):
+        IngestionPipeline(
+            history_db=history_db,
+            vector_store=vector_store,
+            sparse_index=failing_sparse,
+            embedding_provider=current_provider,
+        ).run(source, collection="docs")
+
+    assert vector_store.list_chunks("docs") == []
+    assert failing_sparse.search("docs", "Old sparse evidence", top_k=1) == []
+    for provider in (current_provider, other_provider):
+        with pytest.raises(ReindexRequiredError, match="re-index required"):
+            QueryEngine(
+                vector_store=vector_store,
+                sparse_index=failing_sparse,
+                embedding_provider=provider,
+                history_db=history_db,
+            ).search(SearchRequest(query="Old sparse evidence", collection="docs", top_k=1))
+
+    with pytest.raises(ReindexRequiredError, match="history_db is required"):
+        QueryEngine(
+            vector_store=vector_store,
+            sparse_index=failing_sparse,
+            embedding_provider=current_provider,
+        ).search(SearchRequest(query="Old sparse evidence", collection="docs", top_k=1))
 
 
 def test_deleting_ingested_file_removes_indexes_and_history(tmp_path):
@@ -220,14 +312,13 @@ def test_sparse_upsert_failure_rolls_back_dense_chunks_and_prevents_old_dimensio
     assert vector_store.list_chunks("docs") == []
     assert sparse_index.search("docs", "dense sparse failure", top_k=3) == []
 
-    response = QueryEngine(
-        vector_store=vector_store,
-        sparse_index=sparse_index,
-        embedding_provider=old_provider,
-        history_db=history_db,
-    ).search(SearchRequest(query="dense sparse failure", collection="docs", top_k=1, mode="vector"))
-
-    assert response.results == []
+    with pytest.raises(ReindexRequiredError, match="re-index required"):
+        QueryEngine(
+            vector_store=vector_store,
+            sparse_index=sparse_index,
+            embedding_provider=old_provider,
+            history_db=history_db,
+        ).search(SearchRequest(query="dense sparse failure", collection="docs", top_k=1, mode="vector"))
 
 
 def test_failed_rollback_persists_a_dirty_index_gate_for_every_dense_provider(tmp_path):
