@@ -5,9 +5,11 @@ import sys
 from pathlib import Path
 from typing import Any, TextIO
 
+from src.core.answer_generator import AnswerGenerator
 from src.core.query_engine import QueryEngine
 from src.core.settings import Settings
 from src.libs.embedding_factory import build_embedding_provider
+from src.libs.llms import build_llm_provider
 from src.libs.rerankers import build_reranker
 from src.mcp_server.tools import KnowledgeHub, ToolPayload
 from src.observability.trace_writer import JsonlTraceWriter
@@ -132,6 +134,9 @@ def build_local_hub(project_root: Path) -> KnowledgeHub:
     provider = build_embedding_provider(settings.embedding)
     vector_store = build_vector_store(project_root, settings.storage)
     sparse_index = SqliteSparseIndex(project_root / settings.storage.bm25_path)
+    answer_generator = (
+        AnswerGenerator(build_llm_provider(settings.llm)) if settings.llm is not None else None
+    )
     engine = QueryEngine(
         vector_store=vector_store,
         sparse_index=sparse_index,
@@ -145,6 +150,7 @@ def build_local_hub(project_root: Path) -> KnowledgeHub:
         trace_writer=JsonlTraceWriter(project_root / settings.storage.traces_path),
         rrf_k=settings.retrieval.rrf_k,
         candidate_pool_size=settings.retrieval.candidate_pool_size,
+        answer_generator=answer_generator,
     )
     return KnowledgeHub(query_engine=engine, vector_store=vector_store)
 

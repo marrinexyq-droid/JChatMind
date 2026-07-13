@@ -23,6 +23,13 @@ class EmbeddingSettings(BaseModel):
     base_url: str
 
 
+class LlmSettings(BaseModel):
+    provider: str = "ollama"
+    model: str
+    base_url: str
+    timeout_seconds: float = 30.0
+
+
 class RetrievalSettings(BaseModel):
     rrf_k: int = 60
     default_top_k: int = 5
@@ -41,6 +48,7 @@ class Settings(BaseModel):
     app_name: str
     storage: StorageSettings
     embedding: EmbeddingSettings
+    llm: LlmSettings | None = None
     retrieval: RetrievalSettings
     evaluation: EvaluationSettings
 

@@ -12,6 +12,7 @@ from src.mcp_server.server import JsonRpcMcpServer
 from src.mcp_server.tools import KnowledgeHub
 from src.storage.sparse_index import SqliteSparseIndex
 from src.storage.vector_store import SqliteVectorStore
+from src.mcp_server import server as server_module
 
 
 def build_hub(tmp_path: Path) -> tuple[KnowledgeHub, str]:
@@ -199,6 +200,51 @@ def test_mcp_server_reports_reindex_required_for_incompatible_embedding_settings
 
     assert response["error"]["code"] == -32603
     assert "re-index required" in response["error"]["message"]
+
+
+def test_build_local_hub_uses_llm_settings_for_answer_generation(monkeypatch, tmp_path):
+    settings = server_module.Settings.model_validate(
+        {
+            "app_name": "test-rag-mcp",
+            "storage": {
+                "vector_store_backend": "sqlite",
+                "chroma_path": "data/db/chroma",
+                "bm25_path": "data/db/bm25",
+                "ingestion_history_db": "data/db/ingestion_history.db",
+                "image_index_db": "data/db/image_index.db",
+                "traces_path": "logs/traces.jsonl",
+            },
+            "embedding": {"provider": "hash", "model": "hash", "base_url": ""},
+            "llm": {
+                "provider": "ollama",
+                "model": "llama3.2",
+                "base_url": "http://ollama.local:11434",
+            },
+            "retrieval": {},
+            "evaluation": {"baseline_report": "output/report.md", "metrics_dir": "output/metrics"},
+        }
+    )
+    observed = []
+
+    class FixedLLM:
+        def generate(self, prompt: str) -> str:
+            return "Configured answer [C1]."
+
+    monkeypatch.setattr(
+        server_module.Settings,
+        "load",
+        classmethod(lambda _cls, _path: settings),
+    )
+    monkeypatch.setattr(
+        server_module,
+        "build_llm_provider",
+        lambda llm_settings: observed.append(llm_settings) or FixedLLM(),
+    )
+
+    hub = server_module.build_local_hub(tmp_path)
+
+    assert observed == [settings.llm]
+    assert hub.query_engine.answer_generator is not None
 
 
 def test_mcp_main_speaks_json_rpc_over_stdio():

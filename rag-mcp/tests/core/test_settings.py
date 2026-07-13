@@ -13,6 +13,10 @@ def test_loads_default_settings_file():
     assert settings.storage.vector_store_backend == "chroma"
     assert settings.storage.sqlite_fallback_when_chroma_unavailable is True
     assert settings.storage.chroma_path == "data/db/chroma"
+    assert settings.llm is not None
+    assert settings.llm.provider == "ollama"
+    assert settings.llm.model == "llama3.2"
+    assert settings.llm.timeout_seconds == 30.0
     assert settings.evaluation.baseline_report.endswith("rag_eval_report.md")
 
 

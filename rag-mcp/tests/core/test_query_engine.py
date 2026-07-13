@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from src.core.answer_generator import AnswerGenerator
 from src.core.query_engine import QueryEngine, _build_answer
 from src.core.types import RetrievalResult, SearchRequest
 from src.ingestion.integrity import ReindexRequiredError
@@ -77,6 +78,19 @@ class FailingReranker:
         top_k: int,
     ) -> list[RetrievalResult]:
         raise RuntimeError("reranker unavailable")
+
+
+class FixedLLM:
+    def __init__(self, answer: str):
+        self.answer = answer
+
+    def generate(self, prompt: str) -> str:
+        return self.answer
+
+
+class FailingAnswerGenerator:
+    def generate(self, query: str, evidence: list[RetrievalResult]) -> str:
+        raise RuntimeError("OLLAMA_API_KEY=test-only-key")
 
 
 def test_query_engine_empty_index_returns_no_evidence():
@@ -175,6 +189,70 @@ def test_hybrid_rerank_falls_back_to_fused_candidates_and_traces_error(tmp_path)
     assert rerank_stage["details"]["fallback"] is True
     assert rerank_stage["details"]["candidate_count"] == 2
     assert "reranker unavailable" in rerank_stage["details"]["error"]
+
+
+def test_query_engine_generates_cited_answer_and_traces_success(tmp_path):
+    trace_path = tmp_path / "traces.jsonl"
+    engine = QueryEngine(
+        vector_store=FakeVectorStore([_result("c1", 0.9, "vector")]),
+        embedding_provider=FakeEmbeddingProvider(),
+        history_db=tmp_path / "history.db",
+        answer_generator=AnswerGenerator(FixedLLM("RRF combines ranked lists [C1].")),
+        trace_writer=JsonlTraceWriter(trace_path),
+    )
+
+    response = engine.search(
+        SearchRequest(query="What is RRF?", collection="war-room", top_k=1)
+    )
+
+    assert response.answer_text == "RRF combines ranked lists [C1]."
+    assert [result.citation_id for result in response.results] == ["C1"]
+    trace = json.loads(trace_path.read_text(encoding="utf-8").splitlines()[0])
+    answer_stage = next(stage for stage in trace["stages"] if stage["name"] == "answer_generation")
+    assert answer_stage["details"]["fallback"] is False
+
+
+def test_query_engine_falls_back_to_evidence_when_answer_generation_fails(tmp_path):
+    trace_path = tmp_path / "traces.jsonl"
+    engine = QueryEngine(
+        vector_store=FakeVectorStore([_result("c1", 0.9, "vector")]),
+        embedding_provider=FakeEmbeddingProvider(),
+        history_db=tmp_path / "history.db",
+        answer_generator=FailingAnswerGenerator(),
+        trace_writer=JsonlTraceWriter(trace_path),
+    )
+
+    response = engine.search(
+        SearchRequest(query="What is RRF?", collection="war-room", top_k=1)
+    )
+
+    assert response.answer_text == "Evidence found:\n[C1] Text for c1"
+    trace = json.loads(trace_path.read_text(encoding="utf-8").splitlines()[0])
+    answer_stage = next(stage for stage in trace["stages"] if stage["name"] == "answer_generation")
+    assert answer_stage["details"]["fallback"] is True
+    assert answer_stage["details"]["error"] == "answer generation failed"
+    assert "test-only-key" not in json.dumps(trace)
+
+
+def test_query_engine_traces_fallback_for_invalid_generated_citation(tmp_path):
+    trace_path = tmp_path / "traces.jsonl"
+    engine = QueryEngine(
+        vector_store=FakeVectorStore([_result("c1", 0.9, "vector")]),
+        embedding_provider=FakeEmbeddingProvider(),
+        history_db=tmp_path / "history.db",
+        answer_generator=AnswerGenerator(FixedLLM("RRF combines ranked lists [C9].")),
+        trace_writer=JsonlTraceWriter(trace_path),
+    )
+
+    response = engine.search(
+        SearchRequest(query="What is RRF?", collection="war-room", top_k=1)
+    )
+
+    assert response.answer_text == "Evidence found:\n[C1] Text for c1"
+    trace = json.loads(trace_path.read_text(encoding="utf-8").splitlines()[0])
+    answer_stage = next(stage for stage in trace["stages"] if stage["name"] == "answer_generation")
+    assert answer_stage["details"]["fallback"] is True
+    assert answer_stage["details"]["reason"] == "invalid_citation"
 
 
 def test_dense_retrieval_requires_an_integrity_store():

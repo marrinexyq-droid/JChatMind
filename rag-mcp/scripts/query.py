@@ -9,10 +9,12 @@ SCRIPT_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(os.environ.get("RAG_MCP_RUNTIME_ROOT", SCRIPT_ROOT)).resolve()
 sys.path.insert(0, str(SCRIPT_ROOT))
 
+from src.core.answer_generator import AnswerGenerator
 from src.core.query_engine import QueryEngine
 from src.core.settings import Settings
 from src.core.types import SearchRequest
 from src.libs.embedding_factory import build_embedding_provider
+from src.libs.llms import build_llm_provider
 from src.libs.rerankers import build_reranker
 from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
@@ -31,6 +33,9 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = Settings.load(PROJECT_ROOT / "config/settings.yaml")
+    answer_generator = (
+        AnswerGenerator(build_llm_provider(settings.llm)) if settings.llm is not None else None
+    )
     engine = QueryEngine(
         vector_store=build_vector_store(PROJECT_ROOT, settings.storage),
         sparse_index=SqliteSparseIndex(PROJECT_ROOT / settings.storage.bm25_path),
@@ -44,6 +49,7 @@ def main() -> int:
         trace_writer=JsonlTraceWriter(PROJECT_ROOT / settings.storage.traces_path),
         rrf_k=settings.retrieval.rrf_k,
         candidate_pool_size=settings.retrieval.candidate_pool_size,
+        answer_generator=answer_generator,
     )
     response = engine.search(
         SearchRequest(

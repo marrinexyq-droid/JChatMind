@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.core.answer_generator import AnswerGenerator, EvidenceFallback, build_evidence_answer
 from src.core.types import RetrievalResult, SearchRequest
 from src.ingestion.integrity import FileIntegrityStore, ReindexRequiredError
 from src.libs.embeddings import BaseEmbeddingProvider
@@ -31,6 +32,7 @@ class QueryEngine:
         trace_writer: JsonlTraceWriter | None = None,
         rrf_k: int = 60,
         candidate_pool_size: int = 20,
+        answer_generator: AnswerGenerator | None = None,
     ):
         self.vector_store = vector_store
         self.sparse_index = sparse_index
@@ -45,6 +47,7 @@ class QueryEngine:
         self.trace_writer = trace_writer
         self.rrf_k = rrf_k
         self.candidate_pool_size = candidate_pool_size
+        self.answer_generator = answer_generator
 
     def search(self, request: SearchRequest) -> SearchResponse:
         trace = TraceContext(
@@ -156,10 +159,28 @@ class QueryEngine:
             )
             for index, result in enumerate(results, start=1)
         ]
-        response = SearchResponse(
-            answer_text=_build_answer(cited),
-            results=cited,
-        )
+        answer_text = _build_answer(cited)
+        if cited and self.answer_generator is not None:
+            try:
+                generated_answer = self.answer_generator.generate(request.query, cited)
+                fallback = isinstance(generated_answer, EvidenceFallback)
+                answer_text = _build_answer(cited) if fallback else generated_answer
+                details = {"fallback": fallback}
+                if fallback:
+                    details["reason"] = generated_answer.reason
+                trace.record_stage(
+                    "answer_generation",
+                    method=self.answer_generator.__class__.__name__,
+                    details=details,
+                )
+            except Exception:
+                answer_text = _build_answer(cited)
+                trace.record_stage(
+                    "answer_generation",
+                    method=self.answer_generator.__class__.__name__,
+                    details={"fallback": True, "error": "answer generation failed"},
+                )
+        response = SearchResponse(answer_text=answer_text, results=cited)
         self._write_trace(trace)
         return response
 
@@ -169,11 +190,4 @@ class QueryEngine:
 
 
 def _build_answer(results: list[RetrievalResult]) -> str:
-    if not results:
-        return "No evidence found."
-    lines = ["Evidence found:"]
-    for result in results:
-        citation = result.citation_id or "C?"
-        snippet = " ".join(result.text.replace("\ufeff", "").split())
-        lines.append(f"[{citation}] {snippet}")
-    return "\n".join(lines)
+    return build_evidence_answer(results)

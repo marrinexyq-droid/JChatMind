@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from scripts import delete_document, ingest, query
-from src.core.settings import EmbeddingSettings, Settings
+from src.core.settings import EmbeddingSettings, LlmSettings, Settings
 from src.libs.embeddings import HashEmbeddingProvider
 
 
@@ -108,6 +108,43 @@ def test_cli_scripts_build_provider_from_configured_settings(monkeypatch, tmp_pa
     assert delete_document.main() == 0
 
     assert observed == [settings.embedding, settings.embedding, settings.embedding]
+
+
+def test_query_cli_uses_configured_llm_for_cited_answer(monkeypatch, capsys, tmp_path):
+    source = tmp_path / "cli.md"
+    collection = f"cli-test-{tmp_path.name}"
+    source.write_text("# CLI RAG\n\nThe command line path supports hybrid retrieval.", encoding="utf-8")
+    settings = _offline_settings().model_copy(
+        update={
+            "llm": LlmSettings(
+                provider="ollama",
+                model="llama3.2",
+                base_url="http://ollama.local:11434",
+            )
+        }
+    )
+    observed = []
+
+    class FixedLLM:
+        def generate(self, prompt: str) -> str:
+            return "The command line path supports hybrid retrieval [C1]."
+
+    _configure_scripts(monkeypatch, tmp_path, settings)
+    monkeypatch.setattr(
+        query,
+        "build_llm_provider",
+        lambda llm_settings: observed.append(llm_settings) or FixedLLM(),
+    )
+
+    monkeypatch.setattr(sys, "argv", ["ingest.py", str(source), "--collection", collection])
+    assert ingest.main() == 0
+    capsys.readouterr()
+
+    monkeypatch.setattr(sys, "argv", ["query.py", "hybrid retrieval", "--collection", collection])
+    assert query.main() == 0
+
+    assert "The command line path supports hybrid retrieval [C1]." in capsys.readouterr().out
+    assert observed == [settings.llm]
 
 
 def test_cli_scripts_start_in_subprocess_with_explicit_hash_runtime_root(tmp_path):
