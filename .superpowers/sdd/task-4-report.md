@@ -105,3 +105,28 @@ DONE
 
 - Public direct dense callers must now provide the same history database as ingestion. This is intentionally fail-closed: an omitted store cannot silently bypass dirty or compatibility checks.
 - There is no multi-process ingestion coordinator beyond the local SQLite integrity record. Its unique local marker serializes destructive replacement phases, and owner-token cleanup prevents one success from clearing another operation's marker. Explicit document deletion remains an operator-managed global cleanup action and should not be run concurrently with ingestion.
+
+## Final review remediation
+
+### Findings
+
+- Pre-write loader, splitter, and embedding failures wrote a `failed` history row through the same upsert path as success. A changed source therefore replaced its prior success fingerprint even though its old chunks remained intact; deleting another source could then incorrectly permit a different embedding configuration.
+- Databases from before the dirty-marker schema could contain `failed` fingerprint-aware history alongside residual dense or sparse chunks. Creating the new table alone did not make that ambiguity fail closed.
+- Explicit deletion did not arm a dirty owner before its first destructive index delete. A succeeding dense delete followed by a failing sparse delete left sparse evidence externally reachable without a gate.
+
+### Fixes
+
+- Failure history now inserts or updates a failed record only when the existing record is not a success. Pre-write failures preserve the old successful digest and fingerprint, while a first failure for a new source is still recorded. This also prevents an arm-contention exception from downgrading the winner's successful record.
+- Schema initialization identifies a real legacy migration: an existing history database paired with an absent dirty table or a dirty table without `operation_id`. If it has failed history, it persists one unresolved legacy dirty marker. Normal current-version pre-write failures do not trigger this migration path.
+- `delete()` now arms the singleton dirty owner before dense or sparse deletion when no marker exists. Any index or history failure retains and records that owner; a successful delete clears only its own owner. When deletion begins with an existing marker, it acts as explicit recovery and clears that marker only after dense and sparse indexes are globally verified empty.
+
+### Tests
+
+- RED: `uv run pytest tests/integration/test_ingestion_query_flow.py -q` failed with seven expected regressions: three pre-write stages overwrote success, arm contention overwrote success, both legacy schema signatures did not gate residual indexes, and delete exposed stale sparse evidence after dense deletion.
+- GREEN: the same suite passed with `23 passed in 3.40s`; integrity, query, MCP, and ingestion focused suites passed with `40 passed in 4.98s`; complete `uv run pytest -q` passed with `114 passed in 15.75s`.
+- Coverage includes A/B success followed by all pre-write failure stages, a new-source failed record, old/new fingerprint behavior after deleting B, owner contention, legacy databases with and without an old dirty table, residual dense/sparse query gates, atomic delete recovery, nonempty successful delete, and clean rebuild with a new fingerprint.
+
+### Risks
+
+- A legacy failed record is intentionally conservative only at the one-time schema migration boundary. Operators must explicitly delete through the pipeline until both local indexes are empty to lift that gate.
+- Deletion that begins while a dirty marker already exists is a recovery action. It leaves that marker in place unless it can verify both the dense and sparse indexes are globally empty.

@@ -1,8 +1,10 @@
+import sqlite3
+
 import pytest
 
 from src.core.query_engine import QueryEngine
-from src.core.types import SearchRequest
-from src.ingestion.integrity import FileIntegrityStore, ReindexRequiredError
+from src.core.types import ChunkRecord, SearchRequest
+from src.ingestion.integrity import FileIntegrityStore, ReindexRequiredError, sha256_file
 from src.ingestion.pipeline import IngestionPipeline
 from src.libs.embeddings import BaseEmbeddingProvider, HashEmbeddingProvider
 from src.storage.sparse_index import SqliteSparseIndex
@@ -57,10 +59,31 @@ class FailingLoader:
         raise RuntimeError("document load failed")
 
 
+class FailingSplitter:
+    def split(self, document):
+        raise RuntimeError("document split failed")
+
+
+class FailingEmbeddingProvider(HashEmbeddingProvider):
+    def embed_text(self, text: str) -> list[float]:
+        raise RuntimeError("document embedding failed")
+
+
 class PartiallyFailingVectorStore(SqliteVectorStore):
     def upsert_chunks(self, chunks, embeddings):
         super().upsert_chunks(chunks, embeddings)
         raise RuntimeError("dense upsert failed after a partial write")
+
+
+class FailingDeleteSparseIndex(SqliteSparseIndex):
+    def __init__(self, db_path):
+        super().__init__(db_path)
+        self.fail_delete = False
+
+    def delete_by_source_path(self, collection: str, source_path: str) -> int:
+        if self.fail_delete:
+            raise RuntimeError("sparse delete failed")
+        return super().delete_by_source_path(collection, source_path)
 
 
 def test_ingestion_pipeline_skips_unchanged_and_query_returns_evidence(tmp_path):
@@ -175,6 +198,317 @@ def test_pre_write_failure_preserves_existing_successful_chunks(tmp_path):
 
     assert response.results
     assert "Old retrieval" in response.results[0].text
+
+
+@pytest.mark.parametrize("failure_stage", ("loader", "splitter", "embedding"))
+def test_pre_write_failures_preserve_prior_success_and_record_only_new_failures(
+    tmp_path, failure_stage
+):
+    source_a = tmp_path / "a.md"
+    source_b = tmp_path / "b.md"
+    failed_source = tmp_path / "new-failure.md"
+    source_a.write_text("# A\n\nA old retrieval evidence.", encoding="utf-8")
+    source_b.write_text("# B\n\nB retrieval evidence.", encoding="utf-8")
+    failed_source.write_text("# New\n\nNew source failure.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    old_provider = HashEmbeddingProvider(dimensions=64)
+    pipeline = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=old_provider,
+    )
+    assert pipeline.run(source_a, collection="docs").status == "ingested"
+    assert pipeline.run(source_b, collection="docs").status == "ingested"
+    old_digest = sha256_file(source_a)
+    old_fingerprint = old_provider.compatibility_fingerprint()
+    source_a.write_text("# A\n\nA changed retrieval evidence.", encoding="utf-8")
+
+    failure_messages = {
+        "loader": "document load failed",
+        "splitter": "document split failed",
+        "embedding": "document embedding failed",
+    }
+    failing_kwargs = {}
+    failing_provider = old_provider
+    if failure_stage == "loader":
+        failing_kwargs["loader"] = FailingLoader()
+    elif failure_stage == "splitter":
+        failing_kwargs["splitter"] = FailingSplitter()
+    else:
+        failing_provider = FailingEmbeddingProvider(dimensions=64)
+    with pytest.raises(RuntimeError, match=failure_messages[failure_stage]):
+        IngestionPipeline(
+            history_db=history_db,
+            vector_store=vector_store,
+            sparse_index=sparse_index,
+            embedding_provider=failing_provider,
+            **failing_kwargs,
+        ).run(source_a, collection="docs")
+
+    with pytest.raises(RuntimeError, match="document load failed"):
+        IngestionPipeline(
+            history_db=history_db,
+            vector_store=vector_store,
+            sparse_index=sparse_index,
+            embedding_provider=old_provider,
+            loader=FailingLoader(),
+        ).run(failed_source, collection="docs")
+
+    store = FileIntegrityStore(history_db)
+    assert store.should_skip(source_a, "docs", old_digest, old_fingerprint)
+    with sqlite3.connect(history_db) as conn:
+        failed_status = conn.execute(
+            "SELECT status FROM ingestion_history WHERE source_path = ? AND collection = ?",
+            (str(failed_source), "docs"),
+        ).fetchone()
+    assert failed_status == ("failed",)
+
+    assert pipeline.delete(source_b, collection="docs").status == "deleted"
+    old_response = QueryEngine(
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=old_provider,
+        history_db=history_db,
+    ).search(SearchRequest(query="A old retrieval", collection="docs", top_k=1, mode="hybrid"))
+    assert old_response.results
+    assert "A old retrieval" in old_response.results[0].text
+
+    replacement_provider = StaticEmbeddingProvider(
+        "provider=ollama;model=replacement;dimensions=3", [1.0, 0.0, 0.0]
+    )
+    with pytest.raises(ReindexRequiredError, match="re-index required"):
+        IngestionPipeline(
+            history_db=history_db,
+            vector_store=vector_store,
+            sparse_index=sparse_index,
+            embedding_provider=replacement_provider,
+        ).run(source_a, collection="docs")
+    with pytest.raises(ReindexRequiredError, match="re-index required"):
+        QueryEngine(
+            vector_store=vector_store,
+            sparse_index=sparse_index,
+            embedding_provider=replacement_provider,
+            history_db=history_db,
+        ).search(SearchRequest(query="A old retrieval", collection="docs", top_k=1, mode="hybrid"))
+
+
+def test_arm_contention_does_not_downgrade_the_winner_success_record(tmp_path, monkeypatch):
+    source = tmp_path / "rag.md"
+    source.write_text("# Old\n\nOld winner evidence.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    provider = HashEmbeddingProvider(dimensions=64)
+    initial = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=provider,
+    )
+    assert initial.run(source, collection="docs").status == "ingested"
+    old_digest = sha256_file(source)
+    source.write_text("# Changed\n\nA contender must not erase the winner.", encoding="utf-8")
+
+    contender = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=provider,
+    )
+    real_arm = contender.integrity_store.arm_index_dirty
+
+    def lose_arm_ownership(*args, **kwargs):
+        real_arm(*args, **kwargs)
+        raise ReindexRequiredError("another ingestion owns the dirty marker")
+
+    monkeypatch.setattr(contender.integrity_store, "arm_index_dirty", lose_arm_ownership)
+    with pytest.raises(ReindexRequiredError, match="another ingestion owns"):
+        contender.run(source, collection="docs")
+
+    assert FileIntegrityStore(history_db).should_skip(
+        source,
+        "docs",
+        old_digest,
+        provider.compatibility_fingerprint(),
+    )
+
+
+@pytest.mark.parametrize("has_legacy_dirty_table", (False, True))
+def test_legacy_failed_history_migration_gates_residual_indexes_until_global_cleanup(
+    tmp_path, has_legacy_dirty_table
+):
+    source = tmp_path / "legacy.md"
+    source.write_text("# Legacy\n\nResidual sparse and dense evidence.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    old_provider = StaticEmbeddingProvider(
+        "provider=hash;model=legacy;dimensions=2", [1.0, 0.0]
+    )
+    replacement_provider = StaticEmbeddingProvider(
+        "provider=ollama;model=replacement;dimensions=3", [1.0, 0.0, 0.0]
+    )
+    with sqlite3.connect(history_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE ingestion_history (
+                source_path TEXT NOT NULL,
+                collection TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                embedding_fingerprint TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
+                document_id TEXT,
+                chunk_count INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (source_path, collection)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ingestion_history (
+                source_path, collection, sha256, embedding_fingerprint, status, document_id,
+                chunk_count, error, updated_at
+            ) VALUES (?, 'docs', ?, ?, 'failed', NULL, 0, 'old partial write',
+                '2026-01-01T00:00:00+00:00')
+            """,
+            (str(source), sha256_file(source), old_provider.compatibility_fingerprint()),
+        )
+        if has_legacy_dirty_table:
+            conn.execute(
+                """
+                CREATE TABLE local_index_integrity (
+                    scope TEXT PRIMARY KEY,
+                    embedding_fingerprint TEXT NOT NULL,
+                    source_path TEXT NOT NULL,
+                    collection TEXT NOT NULL,
+                    error TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    residual_chunk = ChunkRecord(
+        id="legacy-chunk",
+        document_id="legacy-doc",
+        collection="docs",
+        text="Residual sparse and dense evidence.",
+        metadata={"source_path": str(source)},
+    )
+    vector_store.upsert_chunks([residual_chunk], [old_provider.vector])
+    sparse_index.upsert_chunks([residual_chunk])
+
+    assert FileIntegrityStore(history_db).has_dirty_index() is True
+    for provider in (old_provider, replacement_provider):
+        for mode in ("vector", "hybrid"):
+            with pytest.raises(ReindexRequiredError, match="re-index required"):
+                QueryEngine(
+                    vector_store=vector_store,
+                    sparse_index=sparse_index,
+                    embedding_provider=provider,
+                    history_db=history_db,
+                ).search(SearchRequest(query="Residual evidence", collection="docs", top_k=1, mode=mode))
+
+    cleanup = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=old_provider,
+    )
+    assert cleanup.delete(source, collection="docs").status == "deleted"
+    assert FileIntegrityStore(history_db).has_dirty_index() is False
+    assert IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=replacement_provider,
+    ).run(source, collection="docs").status == "ingested"
+
+
+def test_delete_sparse_failure_gates_dense_and_hybrid_until_explicit_empty_cleanup(tmp_path):
+    source = tmp_path / "rag.md"
+    source.write_text("# Delete\n\nStale sparse evidence must be gated.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_path = tmp_path / "sparse.db"
+    old_provider = StaticEmbeddingProvider(
+        "provider=hash;model=old;dimensions=2", [1.0, 0.0]
+    )
+    assert IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=SqliteSparseIndex(sparse_path),
+        embedding_provider=old_provider,
+    ).run(source, collection="docs").status == "ingested"
+
+    failing_sparse = FailingDeleteSparseIndex(sparse_path)
+    failing_sparse.fail_delete = True
+    delete_pipeline = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=failing_sparse,
+        embedding_provider=old_provider,
+    )
+    with pytest.raises(RuntimeError, match="sparse delete failed"):
+        delete_pipeline.delete(source, collection="docs")
+
+    assert vector_store.list_chunks("docs") == []
+    assert failing_sparse.search("docs", "Stale sparse evidence", top_k=1)
+    for mode in ("vector", "hybrid"):
+        with pytest.raises(ReindexRequiredError, match="re-index required"):
+            QueryEngine(
+                vector_store=vector_store,
+                sparse_index=failing_sparse,
+                embedding_provider=old_provider,
+                history_db=history_db,
+            ).search(SearchRequest(query="Stale sparse evidence", collection="docs", top_k=1, mode=mode))
+
+    failing_sparse.fail_delete = False
+    assert delete_pipeline.delete(source, collection="docs").status == "deleted"
+    assert FileIntegrityStore(history_db).has_dirty_index() is False
+    replacement_provider = StaticEmbeddingProvider(
+        "provider=ollama;model=replacement;dimensions=3", [1.0, 0.0, 0.0]
+    )
+    assert IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=failing_sparse,
+        embedding_provider=replacement_provider,
+    ).run(source, collection="docs").status == "ingested"
+
+
+def test_successful_delete_of_one_of_many_sources_does_not_leave_a_dirty_gate(tmp_path):
+    source_a = tmp_path / "a.md"
+    source_b = tmp_path / "b.md"
+    source_a.write_text("# A\n\nDelete this source.", encoding="utf-8")
+    source_b.write_text("# B\n\nKeep this source queryable.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    provider = HashEmbeddingProvider(dimensions=64)
+    pipeline = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=provider,
+    )
+    assert pipeline.run(source_a, collection="docs").status == "ingested"
+    assert pipeline.run(source_b, collection="docs").status == "ingested"
+
+    assert pipeline.delete(source_a, collection="docs").status == "deleted"
+    assert FileIntegrityStore(history_db).has_dirty_index() is False
+    response = QueryEngine(
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=provider,
+        history_db=history_db,
+    ).search(SearchRequest(query="Keep this source", collection="docs", top_k=1, mode="hybrid"))
+    assert response.results
+    assert "Keep this source" in response.results[0].text
 
 
 def test_partial_dense_upsert_failure_rolls_back_current_source_chunks(tmp_path):

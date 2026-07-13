@@ -249,6 +249,7 @@ class FileIntegrityStore:
                     chunk_count = excluded.chunk_count,
                     error = excluded.error,
                     updated_at = excluded.updated_at
+                WHERE ingestion_history.status <> 'success' OR excluded.status = 'success'
                 """,
                 (
                     str(source_path),
@@ -277,6 +278,20 @@ class FileIntegrityStore:
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
+            history_table_exists = _table_exists(conn, "ingestion_history")
+            integrity_table_exists = _table_exists(conn, "local_index_integrity")
+            integrity_columns_before_migration = (
+                {
+                    str(row[1])
+                    for row in conn.execute("PRAGMA table_info(local_index_integrity)").fetchall()
+                }
+                if integrity_table_exists
+                else set()
+            )
+            legacy_integrity_schema = history_table_exists and (
+                not integrity_table_exists
+                or "operation_id" not in integrity_columns_before_migration
+            )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS ingestion_history (
@@ -333,6 +348,43 @@ class FileIntegrityStore:
                     "ALTER TABLE local_index_integrity "
                     "ADD COLUMN operation_id TEXT NOT NULL DEFAULT ''"
                 )
+            if legacy_integrity_schema:
+                legacy_failed = conn.execute(
+                    """
+                    SELECT source_path, collection, embedding_fingerprint
+                    FROM ingestion_history
+                    WHERE status = 'failed'
+                    ORDER BY updated_at, source_path, collection
+                    LIMIT 1
+                    """
+                ).fetchone()
+                if legacy_failed is not None:
+                    conn.execute(
+                        """
+                        INSERT INTO local_index_integrity (
+                            scope, operation_id, embedding_fingerprint, source_path, collection,
+                            error, updated_at
+                        ) VALUES ('local', '', ?, ?, ?, ?, ?)
+                        ON CONFLICT(scope) DO NOTHING
+                        """,
+                        (
+                            str(legacy_failed[2]),
+                            str(legacy_failed[0]),
+                            str(legacy_failed[1]),
+                            "legacy failed ingestion may have left residual vectors",
+                            datetime.now(timezone.utc).isoformat(),
+                        ),
+                    )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+        is not None
+    )

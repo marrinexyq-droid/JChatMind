@@ -185,10 +185,39 @@ class IngestionPipeline:
             trace_type="deletion",
             inputs={"source_path": str(source_path), "collection": collection},
         )
-        vector_deleted = self.vector_store.delete_by_source_path(collection, str(source_path))
-        sparse_deleted = self.sparse_index.delete_by_source_path(collection, str(source_path))
-        history_deleted = self.integrity_store.delete(source_path, collection)
-        self._clear_dirty_index_after_explicit_cleanup()
+        dirty_marker_id: str | None = None
+        if not self.integrity_store.has_dirty_index():
+            dirty_marker_id = self.integrity_store.arm_index_dirty(
+                source_path,
+                collection,
+                self.embedding_provider.compatibility_fingerprint(),
+            )
+        try:
+            vector_deleted = self.vector_store.delete_by_source_path(collection, str(source_path))
+            sparse_deleted = self.sparse_index.delete_by_source_path(collection, str(source_path))
+            history_deleted = self.integrity_store.delete(source_path, collection)
+        except Exception as exc:
+            if dirty_marker_id is not None:
+                try:
+                    self.integrity_store.record_dirty_index_failure(dirty_marker_id, str(exc))
+                except Exception as marker_error:
+                    self._write_trace(
+                        trace,
+                        error=(
+                            f"{exc}; failed to persist the dirty-index marker: {marker_error}"
+                        ),
+                    )
+                    raise RuntimeError(
+                        "failed deletion could not be durably marked as dirty"
+                    ) from marker_error
+            self._write_trace(trace, error=str(exc))
+            raise
+        if dirty_marker_id is not None:
+            if not self.integrity_store.clear_dirty_index_after_success(dirty_marker_id):
+                self._write_trace(trace, error="the dirty-index marker is no longer owned by this deletion")
+                raise RuntimeError("the dirty-index marker is no longer owned by this deletion")
+        else:
+            self._clear_dirty_index_after_explicit_cleanup()
         trace.record_stage(
             "delete",
             method=self.vector_store.__class__.__name__,
