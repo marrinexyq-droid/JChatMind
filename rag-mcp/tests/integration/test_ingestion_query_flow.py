@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 import pytest
@@ -6,7 +7,9 @@ from src.core.query_engine import QueryEngine
 from src.core.types import ChunkRecord, SearchRequest
 from src.ingestion.integrity import FileIntegrityStore, ReindexRequiredError, sha256_file
 from src.ingestion.pipeline import IngestionPipeline
+from src.ingestion.transforms import Transform
 from src.libs.embeddings import BaseEmbeddingProvider, HashEmbeddingProvider
+from src.observability.trace_writer import JsonlTraceWriter
 from src.storage.sparse_index import SqliteSparseIndex
 from src.storage.vector_store import ChromaVectorStore, SqliteVectorStore
 
@@ -84,6 +87,43 @@ class FailingDeleteSparseIndex(SqliteSparseIndex):
         if self.fail_delete:
             raise RuntimeError("sparse delete failed")
         return super().delete_by_source_path(collection, source_path)
+
+
+class FailingOptionalTransform(Transform):
+    def apply(self, chunk: ChunkRecord) -> ChunkRecord:
+        raise RuntimeError("optional transform unavailable")
+
+
+def test_pipeline_reports_progress_and_falls_back_after_optional_transform_failure(tmp_path):
+    source = tmp_path / "evidence.md"
+    source.write_text("# Evidence\n\nFallback must not stop indexing.", encoding="utf-8")
+    progress: list[tuple[str, dict]] = []
+    trace_path = tmp_path / "traces.jsonl"
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    pipeline = IngestionPipeline(
+        history_db=tmp_path / "history.db",
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=HashEmbeddingProvider(dimensions=64),
+        optional_transforms=[FailingOptionalTransform()],
+        trace_writer=JsonlTraceWriter(trace_path),
+    )
+
+    result = pipeline.run(
+        source,
+        collection="docs",
+        on_progress=lambda stage, details: progress.append((stage, details)),
+    )
+
+    assert result.status == "ingested"
+    assert [stage for stage, _ in progress] == ["load", "split", "transform", "embed", "upsert"]
+    assert progress[2][1]["fallback"] is True
+    assert vector_store.list_chunks("docs")
+    assert sparse_index.search("docs", "Fallback", top_k=1)
+    trace = json.loads(trace_path.read_text(encoding="utf-8").splitlines()[0])
+    transform_stage = next(stage for stage in trace["stages"] if stage["name"] == "transform")
+    assert transform_stage["details"]["fallback"] is True
 
 
 def test_ingestion_pipeline_skips_unchanged_and_query_returns_evidence(tmp_path):

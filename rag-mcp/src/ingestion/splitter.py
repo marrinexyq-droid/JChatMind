@@ -18,7 +18,7 @@ class MarkdownTextSplitter:
     def split(self, document: Document) -> list[ChunkRecord]:
         blocks = self._blocks_with_titles(document.text)
         chunks: list[ChunkRecord] = []
-        for title, block in blocks:
+        for title, block, page in blocks:
             for part in self._window(block):
                 text = part.strip()
                 if not text:
@@ -27,32 +27,44 @@ class MarkdownTextSplitter:
                 digest = hashlib.sha1(
                     f"{document.id}:{chunk_index}:{text}".encode("utf-8")
                 ).hexdigest()[:10]
+                metadata = {
+                    **document.metadata,
+                    "title": title,
+                    "chunk_index": chunk_index,
+                    "source_path": document.source_path,
+                }
+                if page is not None:
+                    metadata["page"] = page
                 chunks.append(
                     ChunkRecord(
                         id=f"{document.id}-{chunk_index:04d}-{digest}",
                         document_id=document.id,
                         collection=document.collection,
                         text=text,
-                        metadata={
-                            **document.metadata,
-                            "title": title,
-                            "chunk_index": chunk_index,
-                            "source_path": document.source_path,
-                        },
+                        metadata=metadata,
                     )
                 )
         return chunks
 
-    def _blocks_with_titles(self, text: str) -> list[tuple[str, str]]:
+    def _blocks_with_titles(self, text: str) -> list[tuple[str, str, int | None]]:
         current_title = ""
+        current_page: int | None = None
         current_lines: list[str] = []
-        blocks: list[tuple[str, str]] = []
+        blocks: list[tuple[str, str, int | None]] = []
 
         for line in text.splitlines():
+            page_marker = re.match(r"^\s*<!--\s*page:\s*(\d+)\s*-->\s*$", line)
+            if page_marker:
+                if current_lines:
+                    blocks.append((current_title, "\n".join(current_lines), current_page))
+                current_page = int(page_marker.group(1))
+                current_title = f"Page {current_page}"
+                current_lines = [line]
+                continue
             heading = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
             if heading:
                 if current_lines:
-                    blocks.append((current_title, "\n".join(current_lines)))
+                    blocks.append((current_title, "\n".join(current_lines), current_page))
                     current_lines = []
                 current_title = heading.group(2).strip()
                 current_lines.append(line)
@@ -60,8 +72,8 @@ class MarkdownTextSplitter:
                 current_lines.append(line)
 
         if current_lines:
-            blocks.append((current_title, "\n".join(current_lines)))
-        return blocks or [("", text)]
+            blocks.append((current_title, "\n".join(current_lines), current_page))
+        return blocks or [("", text, None)]
 
     def _window(self, text: str) -> list[str]:
         if len(text) <= self.chunk_size:

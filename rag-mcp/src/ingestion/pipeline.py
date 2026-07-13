@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from src.ingestion.integrity import FileIntegrityStore, sha256_file
+from src.ingestion.loader_factory import load_document
 from src.ingestion.loaders import MarkdownLoader
 from src.ingestion.splitter import MarkdownTextSplitter
+from src.ingestion.transforms import MetadataEnricher, RuleCleanupTransform, Transform
 from src.libs.embeddings import BaseEmbeddingProvider
 from src.observability.trace_context import TraceContext
 from src.observability.trace_writer import JsonlTraceWriter
@@ -44,16 +47,28 @@ class IngestionPipeline:
         loader: MarkdownLoader | None = None,
         splitter: MarkdownTextSplitter | None = None,
         trace_writer: JsonlTraceWriter | None = None,
+        transforms: Sequence[Transform] | None = None,
+        optional_transforms: Sequence[Transform] | None = None,
     ):
         self.integrity_store = FileIntegrityStore(history_db)
         self.vector_store = vector_store
         self.sparse_index = sparse_index
         self.embedding_provider = embedding_provider
-        self.loader = loader or MarkdownLoader()
+        self.loader = loader
         self.splitter = splitter or MarkdownTextSplitter()
         self.trace_writer = trace_writer
+        self.transforms = list(transforms) if transforms is not None else [
+            RuleCleanupTransform(),
+            MetadataEnricher(),
+        ]
+        self.optional_transforms = list(optional_transforms or ())
 
-    def run(self, source_path: Path, collection: str = "default") -> IngestionResult:
+    def run(
+        self,
+        source_path: Path,
+        collection: str = "default",
+        on_progress: Callable[[str, dict], None] | None = None,
+    ) -> IngestionResult:
         trace = TraceContext(
             trace_type="ingestion",
             inputs={"source_path": str(source_path), "collection": collection},
@@ -93,25 +108,43 @@ class IngestionPipeline:
 
         dirty_marker_id: str | None = None
         try:
-            document = self.loader.load(source_path, collection)
-            trace.record_stage(
+            document = (
+                self.loader.load(source_path, collection)
+                if self.loader is not None
+                else load_document(source_path, collection)
+            )
+            self._record_stage(
+                trace,
                 "load",
-                method=self.loader.__class__.__name__,
+                method=(self.loader.__class__.__name__ if self.loader is not None else "load_document"),
                 details={"document_id": document.id, "characters": len(document.text)},
+                on_progress=on_progress,
             )
             chunks = self.splitter.split(document)
-            trace.record_stage(
+            self._record_stage(
+                trace,
                 "split",
                 method=self.splitter.__class__.__name__,
                 details={"chunk_count": len(chunks)},
+                on_progress=on_progress,
+            )
+            chunks, transform_details = self._apply_transforms(chunks)
+            self._record_stage(
+                trace,
+                "transform",
+                method="ingestion_transforms",
+                details=transform_details,
+                on_progress=on_progress,
             )
             embeddings = self.embedding_provider.embed_texts(
                 [chunk.embedding_text() for chunk in chunks]
             )
-            trace.record_stage(
+            self._record_stage(
+                trace,
                 "embed",
                 method=self.embedding_provider.__class__.__name__,
                 details={"embedding_count": len(embeddings)},
+                on_progress=on_progress,
             )
             dirty_marker_id = self.integrity_store.arm_index_dirty(
                 source_path,
@@ -122,10 +155,12 @@ class IngestionPipeline:
             self.sparse_index.delete_by_source_path(collection, document.source_path)
             self.vector_store.upsert_chunks(chunks, embeddings)
             self.sparse_index.upsert_chunks(chunks)
-            trace.record_stage(
+            self._record_stage(
+                trace,
                 "upsert",
                 method=self.vector_store.__class__.__name__,
                 details={"chunk_count": len(chunks)},
+                on_progress=on_progress,
             )
             self.integrity_store.mark_success(
                 source_path,
@@ -243,6 +278,39 @@ class IngestionPipeline:
     def _write_trace(self, trace: TraceContext, error: str | None = None) -> None:
         if self.trace_writer is not None:
             self.trace_writer.write(trace.finish(error=error))
+
+    def _record_stage(
+        self,
+        trace: TraceContext,
+        name: str,
+        method: str,
+        details: dict,
+        on_progress: Callable[[str, dict], None] | None,
+    ) -> None:
+        trace.record_stage(name, method=method, details=details)
+        if on_progress is not None:
+            on_progress(name, details)
+
+    def _apply_transforms(self, chunks):
+        for transform in self.transforms:
+            chunks = [transform.apply(chunk) for chunk in chunks]
+
+        failed_transforms: list[dict[str, str]] = []
+        for transform in self.optional_transforms:
+            try:
+                transformed_chunks = [transform.apply(chunk) for chunk in chunks]
+            except Exception as exc:
+                failed_transforms.append(
+                    {"transform": transform.__class__.__name__, "error": str(exc)}
+                )
+            else:
+                chunks = transformed_chunks
+
+        return chunks, {
+            "transform_count": len(self.transforms) + len(self.optional_transforms),
+            "fallback": bool(failed_transforms),
+            "failed_transforms": failed_transforms,
+        }
 
     def _compensate_failed_write(self, source_path: Path, collection: str) -> str | None:
         source = str(source_path)
