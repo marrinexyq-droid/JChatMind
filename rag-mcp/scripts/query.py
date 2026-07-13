@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
+SCRIPT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(os.environ.get("RAG_MCP_RUNTIME_ROOT", SCRIPT_ROOT)).resolve()
+sys.path.insert(0, str(SCRIPT_ROOT))
 
 from src.core.query_engine import QueryEngine
 from src.core.settings import Settings
@@ -33,6 +35,7 @@ def main() -> int:
         vector_store=build_vector_store(PROJECT_ROOT, settings.storage),
         sparse_index=SqliteSparseIndex(PROJECT_ROOT / settings.storage.bm25_path),
         embedding_provider=build_embedding_provider(settings.embedding),
+        history_db=PROJECT_ROOT / settings.storage.ingestion_history_db,
         reranker=build_reranker(
             settings.retrieval.rerank_backend,
             base_url=settings.retrieval.reranker_base_url,

@@ -47,6 +47,24 @@ def test_factory_uses_hash_only_when_explicitly_configured():
     assert isinstance(provider, HashEmbeddingProvider)
 
 
+def test_hash_provider_fingerprint_tracks_the_configured_model():
+    legacy = build_embedding_provider(
+        EmbeddingSettings(provider="hash", model="legacy-hash", base_url="")
+    )
+    replacement = build_embedding_provider(
+        EmbeddingSettings(provider="hash", model="replacement-hash", base_url="")
+    )
+
+    assert legacy.compatibility_fingerprint() != replacement.compatibility_fingerprint()
+
+
+def test_ollama_provider_fingerprint_tracks_the_configured_model():
+    legacy = OllamaEmbeddingProvider("http://ollama.local:11434", "bge-m3")
+    replacement = OllamaEmbeddingProvider("http://ollama.local:11434", "nomic-embed-text")
+
+    assert legacy.compatibility_fingerprint() != replacement.compatibility_fingerprint()
+
+
 def test_factory_rejects_unsupported_provider():
     settings = EmbeddingSettings(provider="unknown", model="test", base_url="")
 

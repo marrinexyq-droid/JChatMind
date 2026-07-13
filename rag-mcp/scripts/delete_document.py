@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
+SCRIPT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(os.environ.get("RAG_MCP_RUNTIME_ROOT", SCRIPT_ROOT)).resolve()
+sys.path.insert(0, str(SCRIPT_ROOT))
 
 from src.core.settings import Settings
 from src.ingestion.pipeline import IngestionPipeline

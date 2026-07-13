@@ -159,6 +159,47 @@ def test_mcp_server_rejects_invalid_params_and_retrieval_mode(tmp_path):
     assert bad_mode["error"]["code"] == -32602
 
 
+def test_mcp_server_reports_reindex_required_for_incompatible_embedding_settings(tmp_path):
+    source = tmp_path / "mcp.md"
+    source.write_text("# MCP RAG\n\nOld embedding dimension.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    old_provider = HashEmbeddingProvider(dimensions=2, model="legacy")
+    new_provider = HashEmbeddingProvider(dimensions=3, model="replacement")
+    IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=old_provider,
+    ).run(source, collection="mcp-test")
+    hub = KnowledgeHub(
+        QueryEngine(
+            vector_store=vector_store,
+            sparse_index=sparse_index,
+            embedding_provider=new_provider,
+            history_db=history_db,
+        ),
+        vector_store,
+    )
+    server = JsonRpcMcpServer(hub)
+
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "query_knowledge_hub",
+                "arguments": {"query": "embedding", "collection": "mcp-test"},
+            },
+        }
+    )
+
+    assert response["error"]["code"] == -32603
+    assert "re-index required" in response["error"]["message"]
+
+
 def test_mcp_main_speaks_json_rpc_over_stdio():
     repo_root = Path(__file__).resolve().parents[3]
     request = {

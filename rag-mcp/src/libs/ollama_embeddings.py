@@ -15,6 +15,12 @@ class OllamaEmbeddingProvider(BaseEmbeddingProvider):
     model: str
     timeout_seconds: float = 30.0
 
+    def compatibility_fingerprint(self) -> str:
+        return (
+            f"provider=ollama;model={self.model};"
+            f"base_url={self.base_url.rstrip('/')}"
+        )
+
     def embed_text(self, text: str) -> list[float]:
         request = urllib.request.Request(
             url=f"{self.base_url.rstrip('/')}/api/embed",

@@ -70,6 +70,59 @@ Query the local index:
 python scripts/query.py "What does this document say about RAG?" --collection default
 ```
 
+## Embedding runtime configuration
+
+The default `config/settings.yaml` uses Ollama with the `bge-m3` model. Before
+running the normal ingest, query, MCP, or dashboard paths, make sure Ollama is
+reachable at `embedding.base_url` and that the configured model is available:
+
+```bash
+ollama pull bge-m3
+ollama serve
+```
+
+For deterministic offline work, set the embedding configuration explicitly to
+Hash rather than relying on the production default:
+
+```yaml
+embedding:
+  provider: hash
+  model: hash
+  base_url: ""
+```
+
+The canary already creates an isolated temporary runtime root with those Hash
+settings, so it remains offline:
+
+```bash
+python scripts/canary_smoke.py
+```
+
+CLI scripts normally use the checked-in `rag-mcp` root. To keep an offline or
+test runtime separate, point them at a root containing its own
+`config/settings.yaml` with `RAG_MCP_RUNTIME_ROOT` while still running the
+scripts from this repository root:
+
+```powershell
+$env:RAG_MCP_RUNTIME_ROOT = "C:\temp\rag-mcp-runtime"
+python scripts/ingest.py C:\docs\note.md --collection notes
+python scripts/query.py "note" --collection notes
+```
+
+Ingestion history persists an embedding compatibility fingerprint for the local
+index. An unchanged file is skipped only when its provider configuration is
+also compatible. Because the Chroma backend uses one physical vector index for
+this runtime, changing embedding provider or model never silently replaces or
+mixes vectors: ingest, CLI query, and MCP query instead return a clear
+`re-index required` error while any collection still has the old fingerprint.
+
+To switch embedding configuration safely, explicitly delete every indexed
+document in every local collection with the existing `delete_document.py`
+command, then ingest all sources again using the new configuration. The data is
+not automatically deleted on a configuration mismatch. Once the local index is
+empty, the Chroma collection is safely recreated on its next ingest or query so
+the new vector dimension can be established without a Chroma dimension error.
+
 Run the MCP-compatible stdio server:
 
 ```bash

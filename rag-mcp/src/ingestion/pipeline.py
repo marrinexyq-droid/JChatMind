@@ -59,13 +59,19 @@ class IngestionPipeline:
             inputs={"source_path": str(source_path), "collection": collection},
         )
         digest = sha256_file(source_path)
+        embedding_fingerprint = self.embedding_provider.compatibility_fingerprint()
         trace.record_stage(
             "file_integrity",
             method="sha256",
             details={"sha256": digest},
         )
 
-        if self.integrity_store.should_skip(source_path, collection, digest):
+        if self.integrity_store.should_skip(
+            source_path,
+            collection,
+            digest,
+            embedding_fingerprint,
+        ):
             result = IngestionResult(
                 status="skipped",
                 document_id=None,
@@ -77,6 +83,12 @@ class IngestionPipeline:
             trace.record_stage("skip", method="ingestion_history", details={"reason": result.message})
             self._write_trace(trace)
             return result
+
+        self.integrity_store.require_collection_compatible(
+            collection,
+            embedding_fingerprint,
+        )
+        self.vector_store.reset_if_empty(collection)
 
         try:
             document = self.loader.load(source_path, collection)
@@ -112,6 +124,7 @@ class IngestionPipeline:
                 source_path,
                 collection,
                 digest,
+                embedding_fingerprint,
                 document_id=document.id,
                 chunk_count=len(chunks),
             )
@@ -126,7 +139,13 @@ class IngestionPipeline:
             self._write_trace(trace)
             return result
         except Exception as exc:
-            self.integrity_store.mark_failed(source_path, collection, digest, str(exc))
+            self.integrity_store.mark_failed(
+                source_path,
+                collection,
+                digest,
+                embedding_fingerprint,
+                str(exc),
+            )
             self._write_trace(trace, error=str(exc))
             raise
 

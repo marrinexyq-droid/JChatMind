@@ -20,6 +20,9 @@ class VectorStore(Protocol):
     def delete_by_source_path(self, collection: str, source_path: str) -> int:
         ...
 
+    def reset_if_empty(self, collection: str) -> bool:
+        ...
+
     def similarity_search(
         self,
         collection: str,
@@ -89,6 +92,16 @@ class ChromaVectorStore:
             return 0
         self._collection.delete(ids=_with_legacy_ids(chunk_ids, collection))
         return len(chunk_ids)
+
+    def reset_if_empty(self, collection: str) -> bool:
+        if self._collection.count() != 0:
+            return False
+        self._client.delete_collection(name=CHROMA_COLLECTION_NAME)
+        self._collection = self._client.get_or_create_collection(
+            name=CHROMA_COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine"},
+        )
+        return True
 
     def similarity_search(
         self,
@@ -213,6 +226,9 @@ class SqliteVectorStore:
                 (collection, *deletion_ids),
             )
         return len(chunk_ids)
+
+    def reset_if_empty(self, collection: str) -> bool:
+        return False
 
     def similarity_search(
         self,

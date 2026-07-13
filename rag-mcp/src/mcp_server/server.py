@@ -136,6 +136,7 @@ def build_local_hub(project_root: Path) -> KnowledgeHub:
         vector_store=vector_store,
         sparse_index=sparse_index,
         embedding_provider=provider,
+        history_db=project_root / settings.storage.ingestion_history_db,
         reranker=build_reranker(
             settings.retrieval.rerank_backend,
             base_url=settings.retrieval.reranker_base_url,

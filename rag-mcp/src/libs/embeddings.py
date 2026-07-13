@@ -14,12 +14,19 @@ class BaseEmbeddingProvider(ABC):
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return [self.embed_text(text) for text in texts]
 
+    def compatibility_fingerprint(self) -> str:
+        return f"provider={self.__class__.__module__}.{self.__class__.__qualname__}"
+
 
 class HashEmbeddingProvider(BaseEmbeddingProvider):
-    def __init__(self, dimensions: int = 128):
+    def __init__(self, dimensions: int = 128, model: str = "hash"):
         if dimensions <= 0:
             raise ValueError("dimensions must be positive")
         self.dimensions = dimensions
+        self.model = model
+
+    def compatibility_fingerprint(self) -> str:
+        return f"provider=hash;model={self.model};dimensions={self.dimensions}"
 
     def embed_text(self, text: str) -> list[float]:
         vector = [0.0] * self.dimensions

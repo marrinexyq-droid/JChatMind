@@ -1,9 +1,24 @@
+import pytest
+
 from src.core.query_engine import QueryEngine
 from src.core.types import SearchRequest
+from src.ingestion.integrity import ReindexRequiredError
 from src.ingestion.pipeline import IngestionPipeline
-from src.libs.embeddings import HashEmbeddingProvider
+from src.libs.embeddings import BaseEmbeddingProvider, HashEmbeddingProvider
 from src.storage.sparse_index import SqliteSparseIndex
-from src.storage.vector_store import SqliteVectorStore
+from src.storage.vector_store import ChromaVectorStore, SqliteVectorStore
+
+
+class StaticEmbeddingProvider(BaseEmbeddingProvider):
+    def __init__(self, fingerprint: str, vector: list[float]):
+        self.fingerprint = fingerprint
+        self.vector = vector
+
+    def embed_text(self, text: str) -> list[float]:
+        return self.vector
+
+    def compatibility_fingerprint(self) -> str:
+        return self.fingerprint
 
 
 def test_ingestion_pipeline_skips_unchanged_and_query_returns_evidence(tmp_path):
@@ -92,3 +107,155 @@ def test_deleting_ingested_file_removes_indexes_and_history(tmp_path):
     assert second.status == "not_found"
     assert vector_store.list_chunks("docs") == []
     assert sparse_index.search("docs", "temporary retrieval", 3) == []
+
+
+@pytest.mark.parametrize("backend", ("sqlite", "chroma"))
+def test_embedding_fingerprint_change_blocks_reingestion_without_deleting_vectors(
+    tmp_path, backend
+):
+    source = tmp_path / "rag.md"
+    other_source = tmp_path / "other.md"
+    source.write_text("# Compatibility\n\nEmbedding changes must replace stale vectors.", encoding="utf-8")
+    other_source.write_text("# Other\n\nThis stale document must be cleared.", encoding="utf-8")
+
+    if backend == "chroma":
+        pytest.importorskip("chromadb")
+        vector_store = ChromaVectorStore(tmp_path / "chroma")
+    else:
+        vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    old_provider = StaticEmbeddingProvider(
+        "provider=hash;model=legacy;dimensions=2", [1.0, 0.0]
+    )
+    new_provider = StaticEmbeddingProvider(
+        "provider=ollama;model=bge-m3;dimensions=3", [0.0, 1.0, 0.0]
+    )
+    old_pipeline = IngestionPipeline(
+        history_db=tmp_path / "history.db",
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=old_provider,
+    )
+    new_pipeline = IngestionPipeline(
+        history_db=tmp_path / "history.db",
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=new_provider,
+    )
+
+    assert old_pipeline.run(source, collection="docs").status == "ingested"
+    assert old_pipeline.run(other_source, collection="docs").status == "ingested"
+    assert old_pipeline.run(source, collection="docs").status == "skipped"
+
+    with pytest.raises(ReindexRequiredError, match="re-index required"):
+        new_pipeline.run(source, collection="docs")
+
+    engine = QueryEngine(
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=new_provider,
+        history_db=tmp_path / "history.db",
+    )
+    with pytest.raises(ReindexRequiredError, match="re-index required"):
+        engine.search(SearchRequest(query="replacement vector", collection="docs", top_k=1, mode="vector"))
+
+    chunks = vector_store.list_chunks("docs")
+    assert len(chunks) == 2
+    assert {chunk.metadata["source_path"] for chunk in chunks} == {str(source), str(other_source)}
+    assert sparse_index.search("docs", "stale document", top_k=3)
+
+
+def test_explicitly_deleted_chroma_collection_can_be_reindexed_with_new_dimensions(tmp_path):
+    pytest.importorskip("chromadb")
+    source = tmp_path / "rag.md"
+    source.write_text("# Compatibility\n\nA clean collection can be reindexed.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    vector_store = ChromaVectorStore(tmp_path / "chroma")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    old_provider = StaticEmbeddingProvider(
+        "provider=hash;model=legacy;dimensions=2", [1.0, 0.0]
+    )
+    new_provider = StaticEmbeddingProvider(
+        "provider=ollama;model=bge-m3;dimensions=3", [0.0, 1.0, 0.0]
+    )
+    old_pipeline = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=old_provider,
+    )
+    new_pipeline = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=new_provider,
+    )
+
+    assert old_pipeline.run(source, collection="docs").status == "ingested"
+    assert old_pipeline.delete(source, collection="docs").status == "deleted"
+    empty_response = QueryEngine(
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=new_provider,
+        history_db=history_db,
+    ).search(SearchRequest(query="reindexed", collection="docs", top_k=1, mode="vector"))
+    assert empty_response.results == []
+    assert new_pipeline.run(source, collection="docs").status == "ingested"
+
+    response = QueryEngine(
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=new_provider,
+        history_db=history_db,
+    ).search(SearchRequest(query="reindexed", collection="docs", top_k=1, mode="vector"))
+
+    assert response.results[0].score == 1.0
+
+
+@pytest.mark.parametrize("backend", ("sqlite", "chroma"))
+def test_embedding_fingerprint_change_blocks_other_collections_in_same_local_index(tmp_path, backend):
+    first_source = tmp_path / "first.md"
+    second_source = tmp_path / "second.md"
+    first_source.write_text("# First\n\nLegacy collection.", encoding="utf-8")
+    second_source.write_text("# Second\n\nReplacement collection.", encoding="utf-8")
+    history_db = tmp_path / "history.db"
+    if backend == "chroma":
+        pytest.importorskip("chromadb")
+        vector_store = ChromaVectorStore(tmp_path / "chroma")
+    else:
+        vector_store = SqliteVectorStore(tmp_path / "vectors.db")
+    sparse_index = SqliteSparseIndex(tmp_path / "sparse.db")
+    legacy = StaticEmbeddingProvider("provider=hash;model=legacy;dimensions=2", [1.0, 0.0])
+    replacement = StaticEmbeddingProvider(
+        "provider=ollama;model=replacement;dimensions=3", [0.0, 1.0, 0.0]
+    )
+    legacy_pipeline = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=legacy,
+    )
+    replacement_pipeline = IngestionPipeline(
+        history_db=history_db,
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=replacement,
+    )
+
+    assert legacy_pipeline.run(first_source, collection="first").status == "ingested"
+    with pytest.raises(ReindexRequiredError, match="re-index required"):
+        replacement_pipeline.run(second_source, collection="second")
+
+    replacement_engine = QueryEngine(
+        vector_store=vector_store,
+        sparse_index=sparse_index,
+        embedding_provider=replacement,
+        history_db=history_db,
+    )
+    with pytest.raises(ReindexRequiredError, match="re-index required"):
+        replacement_engine.search(
+            SearchRequest(query="replacement", collection="second", top_k=1, mode="vector")
+        )
+    assert len(vector_store.list_chunks("first")) == 1
+    assert vector_store.list_chunks("second") == []
+    assert sparse_index.search("first", "legacy", top_k=3)

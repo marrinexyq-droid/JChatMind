@@ -9,5 +9,5 @@ def build_embedding_provider(settings: EmbeddingSettings) -> BaseEmbeddingProvid
     if settings.provider == "ollama":
         return OllamaEmbeddingProvider(settings.base_url, settings.model)
     if settings.provider == "hash":
-        return HashEmbeddingProvider()
+        return HashEmbeddingProvider(model=settings.model)
     raise ValueError(f"unsupported embedding provider: {settings.provider}")
