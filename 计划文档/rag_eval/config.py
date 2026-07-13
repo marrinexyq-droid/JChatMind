@@ -9,7 +9,7 @@ DB_CONFIG = {
     "port": 5432,
     "database": "jchatmind",
     "user": "postgres",
-    "password": os.getenv("DB_PASSWORD", "123456"),
+    "password": os.getenv("DB_PASSWORD"),
 }
 
 # ====== 服务地址 ======
@@ -18,10 +18,7 @@ OLLAMA_MODEL = "bge-m3"
 RERANKER_BASE = "http://127.0.0.1:8001"
 
 # ====== LLM (智谱 GLM) ======
-ZHIPUAI_API_KEY = os.getenv(
-    "ZHIPUAI_API_KEY",
-    "3a14463a544f4c80844dd18a563a9d8b.bo4YX6sBjstlHwoD",
-)
+ZHIPUAI_API_KEY = os.getenv("ZHIPUAI_API_KEY")
 ZHIPUAI_MODEL = "glm-4"
 
 # ====== 评估参数 ======
