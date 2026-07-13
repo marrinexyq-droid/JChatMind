@@ -11,6 +11,11 @@ $relativeTargets = @(
     "rag-mcp/data/db",
     "scripts/__pycache__"
 )
+$protectedRoots = @(
+    (Join-Path $repoRoot ".github/skills"),
+    (Join-Path $repoRoot "rag-mcp/.venv"),
+    (Join-Path $repoRoot "rag-mcp/.deps")
+)
 
 foreach ($relativeTarget in $relativeTargets) {
     $candidate = Join-Path $repoRoot $relativeTarget
@@ -25,7 +30,18 @@ foreach ($relativeTarget in $relativeTargets) {
 $cacheDirs = @(Get-ChildItem -LiteralPath $repoRoot -Directory -Recurse -Filter __pycache__)
 $cacheDirs | Sort-Object FullName -Descending |
     ForEach-Object {
-        if ($_.FullName.StartsWith($repoRoot + [IO.Path]::DirectorySeparatorChar)) {
+        $cachePath = $_.FullName
+        $isProtected = $protectedRoots | Where-Object {
+            $cachePath.Equals($_, [StringComparison]::OrdinalIgnoreCase) -or
+            $cachePath.StartsWith(
+                $_ + [IO.Path]::DirectorySeparatorChar,
+                [StringComparison]::OrdinalIgnoreCase
+            )
+        }
+        if (
+            $cachePath.StartsWith($repoRoot + [IO.Path]::DirectorySeparatorChar) -and
+            -not $isProtected
+        ) {
             Remove-Item -LiteralPath $_.FullName -Recurse -Force -WhatIf:$WhatIf
         }
     }
