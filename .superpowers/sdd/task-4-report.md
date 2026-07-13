@@ -92,7 +92,7 @@ DONE
 - After loading, splitting, and embedding succeed, ingestion atomically inserts a persisted local dirty marker before deleting either old index representation. Every failure after that point compensates both indexes when possible and retains the marker, including old dense/sparse deletion, new dense/sparse write, history success, and marker-clear failures.
 - A successful ingest clears the dirty marker only after both index writes and the success-history write complete. The marker has a UUID operation owner, and the success cleanup deletes only a matching owner token; a second ingestion cannot arm while the local marker exists, so it cannot erase another unresolved gate.
 - Existing databases migrate `local_index_integrity` with a conservative empty owner token. Such legacy dirty rows remain gated until explicit verified cleanup.
-- Dense-capable `QueryEngine` construction now requires `history_db`; CLI and MCP already supply it, while test helpers were updated. Sparse-only configurations without a vector store and embedding provider remain usable without the integrity store.
+- Any `QueryEngine` configured with a local vector or sparse index now requires `history_db`; CLI and MCP already supply it, while test helpers were updated. Only constructors with no local index remain usable without the integrity store.
 
 ### Tests
 
@@ -130,3 +130,23 @@ DONE
 
 - A legacy failed record is intentionally conservative only at the one-time schema migration boundary. Operators must explicitly delete through the pipeline until both local indexes are empty to lift that gate.
 - Deletion that begins while a dirty marker already exists is a recovery action. It leaves that marker in place unless it can verify both the dense and sparse indexes are globally empty.
+
+## Final sparse-query remediation
+
+### Findings
+
+- The dense branch alone consulted `FileIntegrityStore`. A sparse-only `QueryEngine` could therefore omit `history_db` and query residual sparse evidence after an atomic delete had removed dense chunks but failed to remove sparse chunks.
+
+### Fixes
+
+- Query construction now requires `history_db` whenever either local index is configured. Before either dense or sparse retrieval, it performs one compatibility/dirty-marker check for the requested collection; no-index construction remains unchanged.
+
+### Tests
+
+- RED: query and ingestion focused suites failed exactly because sparse-only construction accepted no history and both current and different fingerprints could read sparse residuals after delete failure (`2 failed, 27 passed`).
+- GREEN: query and ingestion focused suites passed with `29 passed in 3.58s`; query, ingestion, and MCP focused suites passed with `35 passed in 5.22s`; complete `uv run pytest -q` passed with `115 passed in 17.46s`.
+- Added a sparse-only no-history constructor contract and extended the real dense-delete/sparse-delete-failure regression to reject sparse-only retrieval for both fingerprints.
+
+### Risks
+
+- Direct sparse-only callers must provide the same local history database and embedding configuration used by ingestion. This is intentional: a sparse index can be the surviving half of a failed local operation and must not bypass the fail-closed gate.

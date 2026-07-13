@@ -188,6 +188,15 @@ def test_dense_retrieval_requires_an_integrity_store():
     assert vector_store.requested_top_k is None
 
 
+def test_sparse_retrieval_requires_an_integrity_store():
+    sparse_index = FakeSparseIndex([_result("c1", 1.0, "sparse")])
+
+    with pytest.raises(ReindexRequiredError, match="history_db is required"):
+        QueryEngine(sparse_index=sparse_index)
+
+    assert sparse_index.requested_top_k is None
+
+
 def _result(chunk_id: str, score: float, source: str) -> RetrievalResult:
     return RetrievalResult(
         chunk_id=chunk_id,

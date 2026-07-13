@@ -35,9 +35,9 @@ class QueryEngine:
         self.vector_store = vector_store
         self.sparse_index = sparse_index
         self.embedding_provider = embedding_provider
-        if vector_store is not None and embedding_provider is not None and history_db is None:
+        if (vector_store is not None or sparse_index is not None) and history_db is None:
             raise ReindexRequiredError(
-                "history_db is required for dense retrieval; re-index required to verify "
+                "history_db is required for local retrieval; re-index required to verify "
                 "local index integrity"
             )
         self.integrity_store = FileIntegrityStore(history_db) if history_db is not None else None
@@ -67,12 +67,18 @@ class QueryEngine:
 
         dense: list[RetrievalResult] = []
         sparse: list[RetrievalResult] = []
-        if self.vector_store is not None and self.embedding_provider is not None:
+        if self.vector_store is not None or self.sparse_index is not None:
             assert self.integrity_store is not None
+            embedding_fingerprint = (
+                self.embedding_provider.compatibility_fingerprint()
+                if self.embedding_provider is not None
+                else ""
+            )
             self.integrity_store.require_collection_compatible(
                 request.collection,
-                self.embedding_provider.compatibility_fingerprint(),
+                embedding_fingerprint,
             )
+        if self.vector_store is not None and self.embedding_provider is not None:
             self.vector_store.reset_if_empty(request.collection)
             query_embedding = self.embedding_provider.embed_text(request.query)
             dense = self.vector_store.similarity_search(

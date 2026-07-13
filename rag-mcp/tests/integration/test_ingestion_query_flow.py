@@ -438,6 +438,9 @@ def test_delete_sparse_failure_gates_dense_and_hybrid_until_explicit_empty_clean
     old_provider = StaticEmbeddingProvider(
         "provider=hash;model=old;dimensions=2", [1.0, 0.0]
     )
+    replacement_provider = StaticEmbeddingProvider(
+        "provider=ollama;model=replacement;dimensions=3", [1.0, 0.0, 0.0]
+    )
     assert IngestionPipeline(
         history_db=history_db,
         vector_store=vector_store,
@@ -467,12 +470,19 @@ def test_delete_sparse_failure_gates_dense_and_hybrid_until_explicit_empty_clean
                 history_db=history_db,
             ).search(SearchRequest(query="Stale sparse evidence", collection="docs", top_k=1, mode=mode))
 
+    for provider in (old_provider, replacement_provider):
+        with pytest.raises(ReindexRequiredError, match="re-index required"):
+            QueryEngine(
+                sparse_index=failing_sparse,
+                embedding_provider=provider,
+                history_db=history_db,
+            ).search(SearchRequest(query="Stale sparse evidence", collection="docs", top_k=1))
+    with pytest.raises(ReindexRequiredError, match="history_db is required"):
+        QueryEngine(sparse_index=failing_sparse, embedding_provider=old_provider)
+
     failing_sparse.fail_delete = False
     assert delete_pipeline.delete(source, collection="docs").status == "deleted"
     assert FileIntegrityStore(history_db).has_dirty_index() is False
-    replacement_provider = StaticEmbeddingProvider(
-        "provider=ollama;model=replacement;dimensions=3", [1.0, 0.0, 0.0]
-    )
     assert IngestionPipeline(
         history_db=history_db,
         vector_store=vector_store,
