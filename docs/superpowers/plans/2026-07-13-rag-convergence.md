@@ -239,6 +239,11 @@ git commit -m "security: remove committed secret defaults"
 
 人工门禁：提交完成后必须在对应平台轮换已暴露的邮箱、DeepSeek 和智谱凭证；代码提交不能替代凭证轮换。
 
+Gemini 凭证验证规则：只读取环境变量 `GOOGLE_API_KEY`，使用项目现有 Gemini
+adapter 发出一次最小请求，日志只记录 `configured/valid/invalid` 和 HTTP 状态分类，
+不得记录 key、Authorization header 或完整响应。DeepSeek、智谱、邮箱和数据库旧
+凭证不做可用性探测，统一按已泄露处理并轮换。
+
 ---
 
 ### Task 3：使用 uv 建立可复现 Python 环境
@@ -664,6 +669,72 @@ git commit -m "feat: propagate Python rag trace through Java"
 
 ---
 
+### Task 8A：修复前端基线质量门禁
+
+**文件：**
+
+- Modify: `ui/src/components/JChatMindLayout.tsx`
+- Modify: `ui/src/components/SideMenu.tsx`
+- Modify: `ui/src/components/modals/GlassModal.tsx`
+- Modify: `ui/src/components/pet/AsteroidPet3D.tsx`
+- Modify: `ui/src/components/pet/PetContext.tsx`
+- Modify: `ui/src/components/pet/PetOverlay.tsx`
+- Modify: `ui/src/contexts/ChatSessionsContext.tsx`
+- Modify: `ui/src/hooks/useAgents.tsx`
+- Modify: `ui/src/hooks/useKnowledgeBases.tsx`
+- Modify: `ui/src/layout/Sidebar.tsx`
+- Test: `ui/package.json` 中的 `lint` 与 `build`
+
+**接口：**
+
+- Consumes: 现有 React 组件 props、context 和 hooks。
+- Produces: `npm run lint` 0 error、0 warning；`npm run build` 退出码 0，且不改变现有 UI 行为。
+
+- [ ] **Step 1：记录失败基线**
+
+```powershell
+cd ui
+npm run lint
+npm run build
+```
+
+Expected：lint 复现当前 `no-explicit-any`、hooks purity、conditional hooks、Fast Refresh
+和 effect setState 问题；build 复现或确认本地 native package 安装问题。
+
+- [ ] **Step 2：修复类型与未使用参数**
+
+用现有 domain type、Ant Design event type 或 `unknown` + type guard 替换 `any`；删除
+未使用参数，或在确实属于接口契约时从 props 类型与调用方同时移除。
+
+- [ ] **Step 3：修复 React hooks 规则**
+
+- 将随机几何数据移到模块级稳定 seeded generator 或组件外 factory。
+- 所有 hooks 移到 early return 之前。
+- 补齐 `useMemo` 的 `roughness/metalness` 依赖。
+- 将同步 effect 初始化改为 `useState(() => initialValue)`。
+- 将 context helper/constants 移到非组件文件，保持 Fast Refresh 边界。
+
+- [ ] **Step 4：重建前端依赖并验证**
+
+若 native package 缺失，使用 lockfile 重建：
+
+```powershell
+npm ci
+npm run lint
+npm run build
+```
+
+Expected：lint 0 error、0 warning；build 退出码 0。
+
+- [ ] **Step 5：提交**
+
+```bash
+git add ui/src ui/package-lock.json
+git commit -m "fix: restore frontend lint and build baseline"
+```
+
+---
+
 ### Task 9：Canary Burn-in、默认切流与 Java RAG 退役
 
 **文件：**
@@ -707,6 +778,10 @@ uv run python scripts/canary_acceptance.py --require-chroma --current-pipeline -
 
 记录 Recall@1、MRR、P95 latency、fallback rate 和 error rate。任一指标低于计划阈值
 则停止，不修改默认 profile。
+
+固定门禁为：连续 3 轮全部通过；Python Recall@1 与 MRR 相比对应 Java 基线下降均
+不超过 `0.02`；error rate 与 fallback rate 均不超过 `1%`；P95 端到端延迟不超过
+`8000 ms`。任何 Chroma 降级、空 generated answer 或 readiness error 都直接判失败。
 
 - [ ] **Step 4：默认开启 Python Bridge**
 
