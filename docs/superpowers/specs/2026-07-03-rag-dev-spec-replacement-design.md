@@ -567,3 +567,58 @@ The replacement is complete when:
 - Evaluation can run locally against a golden set.
 - Java chat/tool integration delegates to Python RAG.
 - Current Java RAG internals are removed, deprecated, or archived.
+
+## Convergence and Cleanup Decision
+
+Date: 2026-07-13
+
+The replacement now moves from version-by-version scaffolding to one gated
+convergence plan. The repository keeps this design as the target-state source of
+truth and keeps exactly one active implementation plan for unfinished work.
+Completed implementation history remains available in Git and in the version
+summary in `rag-mcp/README.md`; it does not require one permanent plan document
+per increment.
+
+### Delivery Order
+
+Work proceeds in this order, and a phase may start only after the previous
+phase's verification gate passes:
+
+1. Remove committed secret defaults and make development configuration safe.
+2. Make the Python environment reproducible and connect configuration to real
+   embedding and Chroma runtime adapters.
+3. Complete one real ingestion-to-answer vertical slice: PDF or Markdown input,
+   retrieval, optional rerank, LLM answer generation, and stable citations.
+4. Run evaluation through the current pipeline with generated answers instead
+   of treating stored observations or reference-answer fallbacks as release
+   evidence.
+5. Burn in the Python path under the canary profile, enable it in the default
+   profile, and then deprecate or remove the Java RAG implementation.
+6. Complete dashboard write operations, real trace propagation, MCP resources,
+   and multimodal features after the canonical cutover path is stable.
+
+### Repository Cleanup Policy
+
+Cleanup is evidence-based:
+
+- Delete ignored build outputs, caches, logs, and temporary directories when
+  they are not needed for an active verification run.
+- Delete byte-identical tracked outputs when one canonical copy remains and no
+  code references the duplicate.
+- Delete unreferenced legacy copies after confirming that Git history or a
+  canonical source preserves the information.
+- Keep files referenced by dataset builders, tests, migration gates, or runtime
+  code until the consuming code is changed and verified.
+- Keep Java RAG, evaluation source data, and canary evidence until Python is the
+  verified default path.
+- Keep compatibility entrypoints such as `AGENTS.md` and `CLAUDE.md` even when
+  their contents match, because different agent runtimes discover different
+  filenames.
+- Keep local Python environments until dependency locking and bootstrap
+  instructions are verified; rebuild and remove stale environments only after
+  that gate passes.
+
+The active implementation plan must name every tracked file it deletes and the
+evidence that makes the deletion safe. Generated-directory cleanup must stay
+inside the repository and must not remove user-owned untracked files whose
+purpose has not been established.
