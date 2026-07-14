@@ -58,16 +58,34 @@ variables. Use `--answer-policy generated` once evaluated answers are written
 into `ragas_cases.combined.jsonl`; the default `reference` policy is a wiring
 smoke test for the judge harness.
 
-Ingest a Markdown document:
+Ingest a Markdown or text-based PDF document:
 
 ```bash
 python scripts/ingest.py path/to/document.md --collection default
+python scripts/ingest.py path/to/manual.pdf --collection default
 ```
+
+PDF ingestion preserves page metadata through splitting. Image-only or scanned
+PDFs need OCR before they can produce retrievable evidence.
 
 Query the local index:
 
 ```bash
 python scripts/query.py "What does this document say about RAG?" --collection default
+```
+
+When the optional `llm` section is configured, the query path uses the selected
+Ollama model to generate an evidence-grounded answer. Every published claim must
+use a citation marker present in the retrieved evidence, such as `[C1]`. A model
+timeout, invalid citation, missing citation, or provider error falls back to the
+stable evidence-only answer and records `fallback: true` in the query trace.
+
+```yaml
+llm:
+  provider: ollama
+  model: llama3.2
+  base_url: http://localhost:11434
+  timeout_seconds: 30
 ```
 
 ## Embedding runtime configuration
@@ -132,6 +150,17 @@ python main.py
 The server exposes `query_knowledge_hub`, `list_collections`,
 `get_system_status`, and `get_document_summary` over JSON-RPC stdio. It keeps
 protocol responses on stdout so MCP clients can consume them.
+
+## Convergence status
+
+The 2026-07-13 convergence implementation has completed Tasks 1–6: workspace
+cleanup, repository secret gates, a frozen Python 3.11/uv environment, runtime
+embedding selection, fail-closed index integrity, Markdown/PDF ingestion, and
+citation-constrained answer generation. The latest complete Python run recorded
+136 passing tests. Live-pipeline evaluation, cross-runtime trace propagation,
+frontend baseline repair, burn-in/default cutover, dashboard actions, and MCP
+resources remain pending, so the default Java fallback is intentionally still
+enabled.
 
 Version 1.0 is complete when tests pass and the evaluation script reports whether
 the existing Java RAG baseline report and the optional `ragas` package are

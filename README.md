@@ -8,12 +8,13 @@ AI 智能体助手，基于 Spring AI 构建，实现自主决策、工具调用
 
 - Spring AI + Java 后端
 - PostgreSQL + pgvector（RAG 知识库）
+- Python 3.11 + Chroma + MCP（新 RAG 替换链路，受控切流中）
 - DeepSeek / 智谱 AI 多模型支持
 - SSE 实时通信
 - Think-Execute Agent 循环
 - React + TypeScript 前端
 
-## RAG v2 架构
+## 现有 Java RAG v2 架构
 
 JChatMind 实现了完整的 **Hybrid RAG Pipeline**：
 
@@ -36,6 +37,39 @@ JChatMind 实现了完整的 **Hybrid RAG Pipeline**：
 - **轻量 Self-RAG**：生成前评估证据充分性，必要时自动切换 Rerank 或扩大候选池重检索
 - **HNSW 索引**：pgvector HNSW 索引 (m=16, ef_construction=64) 加速向量检索
 - **Agent 工具调用**：Spring AI @Tool 注解，LLM 自主决策是否触发知识库检索
+
+## Python RAG 收敛链路
+
+Python 子系统正在沿受控 Bridge 替换既有 Java RAG 内核，当前链路为：
+
+```text
+Markdown / PDF
+  → Loader Factory → 清洗与元数据 Transform → 语义分块
+  → Ollama BGE-M3 Embedding
+  → Chroma Dense Index + SQLite Sparse Index
+  → Hybrid Retrieval / Rerank
+  → 基于证据的 AnswerGenerator（[C1]、[C2] 引用约束）
+  → MCP stdio → Java Bridge → Agent / SSE / React
+```
+
+索引写入采用 fail-closed 一致性门禁：Embedding 配置变化、替换写入失败或 Dense/Sparse
+部分删除失败时，查询会返回 `re-index required`，避免混用不兼容向量或暴露残留证据。
+
+## 近期开发时间线
+
+| 日期 | 阶段 | 已完成内容 |
+|---|---|---|
+| 2026-07-03 | Python RAG 骨架与 MVP | 建立 `rag-mcp` 配置、核心契约、Trace、评估指标、Markdown 摄取、Hybrid Retrieval、严格 RAGAS 数据集、MCP stdio 工具层与受控 Java Query Bridge；同时接入 Google Gemini ChatClient。 |
+| 2026-07-04 | Bridge 与可观测性 | 增加 Dashboard、Reranker seam、Java 摄取/删除同步、Bridge readiness 健康检查和 `rag-canary` Profile。 |
+| 2026-07-06 | Canary 自动化 | 完成隔离 Smoke、Java 启动前 Preflight、多轮 Acceptance Gate、根目录统一验证脚本和 GitHub Actions 工作流。 |
+| 2026-07-08 | 发布门禁与存储收敛 | 增加 Cutover Readiness 报告、Judge-model RAGAS Gate，并将 Chroma 设为 Dense Vector Store 主实现，保留本地 SQLite 降级。 |
+| 2026-07-13 | 收敛 Task 1–6 | 清理重复产物并保护工作区缓存；移除已提交 Secret 默认值并增加全仓扫描；锁定 Python 3.11/uv 环境；让 Embedding 配置真正驱动运行时；补齐索引原子性与兼容性门禁；支持文本型 PDF 摄取；生成带有效证据引用的回答。 |
+
+当前 [RAG 收敛计划](docs/superpowers/plans/2026-07-13-rag-convergence.md) 已完成 Task 1–6，
+Python 全量测试最新记录为 **136 passed**。下一阶段是当前 Pipeline 评估、跨 Java/React
+透传真实 Trace、前端质量门禁和 Canary burn-in；在这些门禁通过前，默认 Profile 仍保留
+Java RAG fallback，Cutover Readiness 维持 `not_ready`。历史暴露凭证仍必须由仓库所有者
+在外部平台完成轮换，代码扫描不能代替凭证撤销。
 
 ## 更新日志
 
