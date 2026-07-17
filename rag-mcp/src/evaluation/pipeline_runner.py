@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from math import ceil
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+import re
+from typing import Any, Literal, Mapping, Sequence
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.core.query_engine import QueryEngine
 from src.core.types import RetrievalMode, SearchRequest
@@ -19,6 +23,8 @@ class PipelineCaseResult:
     retrieved_context_ids: list[str]
     answer: str
     latency_ms: float
+    ground_truth_context_ids: list[str]
+    matched_ground_truth_context_ids: list[str | None]
     error: str | None = None
     retrieved_contexts: list[str] = field(default_factory=list)
     answer_source: str = "pipeline_error"
@@ -31,6 +37,26 @@ class PipelineEvaluationReport:
     top_k: int
     vector_store_backend: str
     cases: list[PipelineCaseResult]
+
+
+class PipelineGoldenCase(BaseModel):
+    model_config = ConfigDict(extra="allow", strict=True, str_strip_whitespace=True)
+
+    case_id: str = Field(min_length=8)
+    dataset_split: str
+    question: str = Field(min_length=5)
+    answer: str
+    contexts: list[str]
+    ground_truth: str = Field(min_length=20)
+    reference_contexts: list[str]
+    ground_truth_context_ids: list[str]
+    collection: str
+    tags: list[str]
+    difficulty: Literal["easy", "medium", "hard"]
+    expected_answer_type: str
+    tactic: str
+    source_refs: list[dict[str, Any]]
+    quality: dict[str, Any]
 
 
 class PipelineEvaluationRunner:
@@ -50,14 +76,11 @@ class PipelineEvaluationRunner:
         cases: Sequence[Mapping[str, Any]],
         collection: str,
     ) -> PipelineEvaluationReport:
+        validated_cases = _validate_pipeline_cases(cases)
         results: list[PipelineCaseResult] = []
-        for case in cases:
-            case_id = str(case.get("case_id") or "").strip()
-            if not case_id:
-                raise ValueError("golden case is missing case_id")
-            question = str(case.get("question") or "").strip()
-            if not question:
-                raise ValueError(f"case {case_id} is missing question")
+        for case in validated_cases:
+            case_id = case.case_id.strip()
+            question = case.question.strip()
             started = time.perf_counter()
             try:
                 response = self.query_engine.search(
@@ -68,6 +91,10 @@ class PipelineEvaluationRunner:
                         mode=self.mode,
                     )
                 )
+                matched_context_ids = [
+                    _match_ground_truth_context(result, case)
+                    for result in response.results
+                ]
                 results.append(
                     PipelineCaseResult(
                         case_id=case_id,
@@ -75,6 +102,8 @@ class PipelineEvaluationRunner:
                         retrieved_contexts=[item.text for item in response.results],
                         answer=response.answer_text,
                         answer_source=response.answer_source,
+                        ground_truth_context_ids=case.ground_truth_context_ids,
+                        matched_ground_truth_context_ids=matched_context_ids,
                         latency_ms=(time.perf_counter() - started) * 1000,
                     )
                 )
@@ -85,6 +114,8 @@ class PipelineEvaluationRunner:
                         retrieved_context_ids=[],
                         retrieved_contexts=[],
                         answer="",
+                        ground_truth_context_ids=case.ground_truth_context_ids,
+                        matched_ground_truth_context_ids=[],
                         latency_ms=(time.perf_counter() - started) * 1000,
                         error=f"{type(exc).__name__}: {exc}",
                     )
@@ -103,26 +134,56 @@ class PipelineEvaluationRunner:
 
 
 def as_report_dict(report: PipelineEvaluationReport) -> dict[str, Any]:
+    case_count = len(report.cases)
     error_count = sum(case.error is not None for case in report.cases)
     empty_answer_count = sum(not case.answer.strip() for case in report.cases)
+    fallback_count = sum(
+        case.answer_source != "generated_answer" for case in report.cases
+    )
+    recall_values = [
+        _recall_at_one(
+            case.ground_truth_context_ids,
+            case.matched_ground_truth_context_ids,
+        )
+        for case in report.cases
+    ]
+    mrr_values = [
+        _reciprocal_rank(case.matched_ground_truth_context_ids)
+        for case in report.cases
+    ]
+    latency_values = sorted(case.latency_ms for case in report.cases)
     return {
         "version": VERSION,
         "status": (
-            "passed" if error_count == 0 and empty_answer_count == 0 else "failed"
+            "passed"
+            if case_count > 0 and error_count == 0 and empty_answer_count == 0
+            else "failed"
         ),
         "collection": report.collection,
         "mode": report.mode,
         "top_k": report.top_k,
         "vector_store_backend": report.vector_store_backend,
         "summary": {
-            "case_count": len(report.cases),
+            "case_count": case_count,
             "error_count": error_count,
             "empty_answer_count": empty_answer_count,
+        },
+        "retrieval_metrics": {
+            "recall_at_1": _mean(recall_values),
+            "mrr": _mean(mrr_values),
+        },
+        "runtime_metrics": {
+            "p95_latency_ms": _percentile_95(latency_values),
+            "fallback_rate": _rate(fallback_count, case_count),
+            "error_rate": _rate(error_count, case_count),
         },
         "cases": [
             {
                 "case_id": case.case_id,
                 "retrieved_context_ids": case.retrieved_context_ids,
+                "matched_ground_truth_context_ids": (
+                    case.matched_ground_truth_context_ids
+                ),
                 "retrieved_contexts": case.retrieved_contexts,
                 "answer": case.answer,
                 "answer_source": case.answer_source,
@@ -148,3 +209,122 @@ def load_pipeline_cases(
         if row.get("dataset_split") == "answer_generation"
     ]
     return cases if limit is None else cases[:limit]
+
+
+def _validate_pipeline_cases(
+    cases: Sequence[Mapping[str, Any]],
+) -> list[PipelineGoldenCase]:
+    validated: list[PipelineGoldenCase] = []
+    seen_ids: set[str] = set()
+    for index, raw_case in enumerate(cases):
+        try:
+            case = PipelineGoldenCase.model_validate(dict(raw_case))
+        except (TypeError, ValueError, ValidationError) as exc:
+            case_id = raw_case.get("case_id") if isinstance(raw_case, Mapping) else None
+            label = str(case_id or f"index {index}")
+            raise ValueError(f"invalid golden case {label}: {exc}") from exc
+        if case.case_id in seen_ids:
+            raise ValueError(f"invalid golden case {case.case_id}: duplicate case_id")
+        seen_ids.add(case.case_id)
+        validated.append(case)
+    return validated
+
+
+def _mean(values: Sequence[float]) -> float:
+    return round(sum(values) / len(values), 4) if values else 0.0
+
+
+def _rate(count: int, total: int) -> float:
+    return round(count / total, 4) if total else 0.0
+
+
+def _percentile_95(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    index = max(0, ceil(0.95 * len(values)) - 1)
+    return round(values[index], 3)
+
+
+def _match_ground_truth_context(
+    result: Any,
+    case: PipelineGoldenCase,
+) -> str | None:
+    if result.chunk_id in case.ground_truth_context_ids:
+        return result.chunk_id
+
+    metadata = result.metadata if isinstance(result.metadata, Mapping) else {}
+    metadata_context_id = str(
+        metadata.get("golden_context_id") or metadata.get("context_id") or ""
+    )
+    if metadata_context_id in case.ground_truth_context_ids:
+        return metadata_context_id
+
+    result_source_path = str(metadata.get("source_path") or "")
+    result_heading = str(metadata.get("title") or metadata.get("heading") or "")
+    for source_ref in case.source_refs:
+        context_id = str(source_ref.get("context_id") or "")
+        if context_id not in case.ground_truth_context_ids:
+            continue
+        expected_path = str(source_ref.get("source_path") or "")
+        expected_heading = str(source_ref.get("heading") or "")
+        if (
+            expected_path
+            and _source_path_matches(result_source_path, expected_path)
+            and (
+                not expected_heading
+                or _normalized_text(result_heading)
+                == _normalized_text(expected_heading)
+            )
+        ):
+            return context_id
+
+    for index, reference_context in enumerate(case.reference_contexts):
+        if not _context_text_matches(str(result.text), reference_context):
+            continue
+        if index < len(case.ground_truth_context_ids):
+            return case.ground_truth_context_ids[index]
+        if len(case.ground_truth_context_ids) == 1:
+            return case.ground_truth_context_ids[0]
+    return None
+
+
+def _source_path_matches(actual: str, expected: str) -> bool:
+    normalized_actual = actual.replace("\\", "/").lower().strip()
+    normalized_expected = expected.replace("\\", "/").lower().strip()
+    return bool(normalized_expected) and (
+        normalized_actual == normalized_expected
+        or normalized_actual.endswith(f"/{normalized_expected}")
+    )
+
+
+def _context_text_matches(actual: str, expected: str) -> bool:
+    normalized_actual = _normalized_text(actual)
+    normalized_expected = _normalized_text(expected)
+    if min(len(normalized_actual), len(normalized_expected)) < 24:
+        return False
+    return (
+        normalized_actual in normalized_expected
+        or normalized_expected in normalized_actual
+    )
+
+
+def _normalized_text(value: str) -> str:
+    return re.sub(r"\s+", "", value).lower()
+
+
+def _recall_at_one(
+    ground_truth_ids: Sequence[str],
+    matched_ids: Sequence[str | None],
+) -> float:
+    truth = set(ground_truth_ids)
+    if not truth:
+        return 0.0
+    first_match = {matched_ids[0]} if matched_ids and matched_ids[0] else set()
+    return len(first_match & truth) / len(truth)
+
+
+def _reciprocal_rank(matched_ids: Sequence[str | None]) -> float:
+    for index, context_id in enumerate(matched_ids, start=1):
+        if context_id is not None:
+            return 1.0 / index
+    return 0.0

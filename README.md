@@ -64,10 +64,10 @@ Markdown / PDF
 | 2026-07-06 | Canary 自动化 | 完成隔离 Smoke、Java 启动前 Preflight、多轮 Acceptance Gate、根目录统一验证脚本和 GitHub Actions 工作流。 |
 | 2026-07-08 | 发布门禁与存储收敛 | 增加 Cutover Readiness 报告、Judge-model RAGAS Gate，并将 Chroma 设为 Dense Vector Store 主实现，保留本地 SQLite 降级。 |
 | 2026-07-13 | 收敛 Task 1–6 | 清理重复产物并保护工作区缓存；移除已提交 Secret 默认值并增加全仓扫描；锁定 Python 3.11/uv 环境；让 Embedding 配置真正驱动运行时；补齐索引原子性与兼容性门禁；支持文本型 PDF 摄取；生成带有效证据引用的回答。 |
-| 2026-07-17 | 收敛 Task 7 | 增加当前 Pipeline Golden-set runner 与独立 JSON 报告；Judge-RAGAS 的 generated policy 只接受该报告；Canary 2.7 严格拒绝空 case、case error、空答案、reference/evidence fallback 和 SQLite VectorStore。 |
+| 2026-07-17 | 收敛 Task 7 | 增加当前 Pipeline Golden-set runner 与独立 JSON 报告，通过 source path/heading 将运行时 chunk 映射到稳定 Golden context；Judge-RAGAS 的 generated policy 只接受该报告；Canary 2.7 以实时 Recall@1/MRR、全量 Judge 和 Runtime Smoke 作发布结论，并严格拒绝无效 Golden schema、空 case、case error、空答案、reference/evidence fallback 和 SQLite VectorStore。 |
 
 当前 [RAG 收敛计划](docs/superpowers/plans/2026-07-13-rag-convergence.md) 已完成 Task 1–7
-的代码实现，Python 全量测试最新记录为 **157 passed**。本机严格 current-pipeline 运行已
+的代码实现，Python 全量测试最新记录为 **167 passed**。本机严格 current-pipeline 运行已
 正确保持 Chroma 且 fail-closed，但因 Ollama `localhost:11434` 未运行而返回 `failed`；
 因此 P3 运行时 Gate 尚未宣告通过。下一阶段是跨 Java/React 透传真实 Trace、前端质量
 门禁和 Canary burn-in；在这些门禁通过前，默认 Profile 仍保留 Java RAG fallback，

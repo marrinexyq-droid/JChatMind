@@ -66,10 +66,17 @@ def load_answer_generation_cases(
     limit: int | None = None,
     answer_policy: str = "reference",
     pipeline_report: Path | None = None,
+    pipeline_report_data: Mapping[str, Any] | None = None,
 ) -> list[JudgedRagasCase]:
     if answer_policy not in {"generated", "reference"}:
         raise ValueError("answer_policy must be 'generated' or 'reference'")
-    if answer_policy == "generated" and pipeline_report is None:
+    if pipeline_report is not None and pipeline_report_data is not None:
+        raise ValueError("provide pipeline_report or pipeline_report_data, not both")
+    if (
+        answer_policy == "generated"
+        and pipeline_report is None
+        and pipeline_report_data is None
+    ):
         raise ValueError(
             "pipeline_report is required when answer_policy is 'generated'"
         )
@@ -78,8 +85,10 @@ def load_answer_generation_cases(
 
     rows = load_jsonl(dataset_dir / "ragas_cases.combined.jsonl")
     pipeline_cases: dict[str, dict[str, Any]] = {}
+    payload: Mapping[str, Any] | None = pipeline_report_data
     if pipeline_report is not None:
         payload = json.loads(pipeline_report.read_text(encoding="utf-8"))
+    if payload is not None:
         pipeline_cases = {
             str(row["case_id"]): row
             for row in payload.get("cases", [])

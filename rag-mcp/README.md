@@ -157,10 +157,11 @@ The convergence implementation has completed the code for Tasks 1–7: workspace
 cleanup, repository secret gates, a frozen Python 3.11/uv environment, runtime
 embedding selection, fail-closed index integrity, Markdown/PDF ingestion, and
 citation-constrained answer generation, followed by current-pipeline evaluation
-and strict generated-answer gates. The latest complete Python run recorded 157
+and strict generated-answer gates. The latest complete Python run recorded 167
 passing tests. A real strict evaluation still requires an indexed collection,
-Ollama embedding and LLM endpoints, and Chroma; missing runtime dependencies
-produce a failed report instead of a reference-answer or SQLite release pass.
+Ollama embedding and LLM endpoints, Chroma, and configured Judge credentials;
+missing runtime dependencies produce a failed report instead of a
+reference-answer, unjudged-answer, or SQLite release pass.
 Cross-runtime trace propagation, frontend baseline repair, burn-in/default
 cutover, dashboard actions, and MCP resources remain pending, so the default
 Java fallback is intentionally still enabled.
@@ -298,8 +299,11 @@ python scripts/evaluate_current_pipeline.py \
   --output-json output/metrics/current_pipeline.json
 ```
 
-Each case records retrieved chunk IDs and text, answer provenance, latency, and
-errors. `SearchResponse.answer_source` distinguishes `generated_answer`,
+Each case records retrieved chunk IDs and text, their mapped stable Golden
+context IDs, answer provenance, latency, and errors. Runtime chunk IDs are
+resolved by explicit context metadata or source path/heading before the report
+aggregates live Recall@1, MRR, P95 latency, fallback rate, and error rate.
+`SearchResponse.answer_source` distinguishes `generated_answer`,
 `evidence_fallback`, and `no_evidence`. Judge-RAGAS generated mode must read the
 current report and refuses missing cases, errors, blank answers, or fallback
 answers:
@@ -321,10 +325,12 @@ python scripts/canary_acceptance.py \
   --ragas-rounds 3
 ```
 
-This gate fails when no Golden cases ran, any case errored, an answer is blank,
-an answer used reference/evidence fallback, or the live vector backend is
-SQLite. Static RAGAS observations remain available for harness regression, but
-they cannot satisfy the current-pipeline release gate.
+This gate fails when Golden schema validation fails, no cases ran, any case
+errored, an answer is blank, an answer used reference/evidence fallback, live
+Recall@1/MRR misses threshold, the configured Judge rejects any generated
+answer, Runtime Smoke fails, or the live vector backend is SQLite. Static RAGAS
+observations remain available for harness regression, but their thresholds and
+errors do not decide the current-pipeline release status.
 
 Validate dashboard inputs without Streamlit:
 
