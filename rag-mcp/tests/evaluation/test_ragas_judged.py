@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from src.evaluation.ragas_judged import (
     DeterministicJudgeClient,
     JudgeConfig,
@@ -63,12 +65,170 @@ def test_load_answer_generation_cases_can_use_reference_answer_fallback(tmp_path
     assert cases[0].answer_source == "reference_answer_fallback"
 
 
-def test_generated_answer_policy_skips_blank_answers(tmp_path):
+def test_generated_answer_policy_requires_current_pipeline_report(tmp_path):
     dataset_dir = write_dataset(tmp_path)
 
-    cases = load_answer_generation_cases(dataset_dir, answer_policy="generated")
+    with pytest.raises(ValueError, match="pipeline_report is required"):
+        load_answer_generation_cases(dataset_dir, answer_policy="generated")
 
-    assert cases == []
+
+def test_generated_policy_reads_answer_and_contexts_from_pipeline_report(tmp_path):
+    dataset_dir = write_dataset(tmp_path)
+    pipeline_report = tmp_path / "current-pipeline.json"
+    pipeline_report.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "cases": [
+                    {
+                        "case_id": "ans-1",
+                        "answer": "Live generated answer [C1].",
+                        "answer_source": "generated_answer",
+                        "retrieved_context_ids": ["chunk-live-1"],
+                        "retrieved_contexts": ["Live retrieved evidence."],
+                        "error": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cases = load_answer_generation_cases(
+        dataset_dir,
+        answer_policy="generated",
+        pipeline_report=pipeline_report,
+    )
+
+    assert len(cases) == 1
+    assert cases[0].answer == "Live generated answer [C1]."
+    assert cases[0].contexts == ["Live retrieved evidence."]
+    assert cases[0].answer_source == "generated_answer"
+
+
+def test_generated_policy_rejects_reference_answer_fallback(tmp_path):
+    dataset_dir = write_dataset(tmp_path)
+    pipeline_report = tmp_path / "current-pipeline.json"
+    pipeline_report.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "case_id": "ans-1",
+                        "answer": "Static reference answer.",
+                        "answer_source": "reference_answer_fallback",
+                        "retrieved_contexts": ["Live evidence."],
+                        "error": None,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="reference answer fallback"):
+        load_answer_generation_cases(
+            dataset_dir,
+            answer_policy="generated",
+            pipeline_report=pipeline_report,
+        )
+
+
+def test_generated_policy_rejects_evidence_fallback(tmp_path):
+    dataset_dir = write_dataset(tmp_path)
+    pipeline_report = tmp_path / "current-pipeline.json"
+    pipeline_report.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "case_id": "ans-1",
+                        "answer": "Evidence found: [C1]",
+                        "answer_source": "evidence_fallback",
+                        "retrieved_contexts": ["Live evidence."],
+                        "error": None,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="did not use a generated answer"):
+        load_answer_generation_cases(
+            dataset_dir,
+            answer_policy="generated",
+            pipeline_report=pipeline_report,
+        )
+
+
+def test_generated_policy_rejects_failed_pipeline_case(tmp_path):
+    dataset_dir = write_dataset(tmp_path)
+    pipeline_report = tmp_path / "current-pipeline.json"
+    pipeline_report.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "case_id": "ans-1",
+                        "answer": "",
+                        "answer_source": "generated_answer",
+                        "retrieved_contexts": [],
+                        "error": "RuntimeError: model unavailable",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="current pipeline case ans-1 failed"):
+        load_answer_generation_cases(
+            dataset_dir,
+            answer_policy="generated",
+            pipeline_report=pipeline_report,
+        )
+
+
+def test_generated_policy_rejects_blank_pipeline_answer(tmp_path):
+    dataset_dir = write_dataset(tmp_path)
+    pipeline_report = tmp_path / "current-pipeline.json"
+    pipeline_report.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "case_id": "ans-1",
+                        "answer": "",
+                        "answer_source": "generated_answer",
+                        "retrieved_contexts": ["Live evidence."],
+                        "error": None,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="current pipeline case ans-1 has no answer"):
+        load_answer_generation_cases(
+            dataset_dir,
+            answer_policy="generated",
+            pipeline_report=pipeline_report,
+        )
+
+
+def test_generated_policy_requires_result_for_every_dataset_case(tmp_path):
+    dataset_dir = write_dataset(tmp_path)
+    pipeline_report = tmp_path / "current-pipeline.json"
+    pipeline_report.write_text(json.dumps({"cases": []}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="missing current pipeline case ans-1"):
+        load_answer_generation_cases(
+            dataset_dir,
+            answer_policy="generated",
+            pipeline_report=pipeline_report,
+        )
 
 
 def test_limit_zero_returns_no_cases(tmp_path):
@@ -155,6 +315,57 @@ def test_judged_ragas_cli_writes_mock_report(tmp_path):
     report = json.loads(output_json.read_text(encoding="utf-8"))
     assert report["status"] == "passed"
     assert report["dataset"]["answer_policy"] == "reference"
+
+
+def test_judged_ragas_cli_uses_current_pipeline_report_for_generated_policy(tmp_path):
+    dataset_dir = write_dataset(tmp_path)
+    pipeline_report = tmp_path / "current-pipeline.json"
+    output_json = tmp_path / "generated-report.json"
+    pipeline_report.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "case_id": "ans-1",
+                        "answer": "RAG adds grounded context and traceable evidence [C1].",
+                        "answer_source": "generated_answer",
+                        "retrieved_contexts": [
+                            "RAG adds grounded context and traceable evidence."
+                        ],
+                        "error": None,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "--dataset-dir",
+            str(dataset_dir),
+            "--answer-policy",
+            "generated",
+            "--pipeline-report",
+            str(pipeline_report),
+            "--mock-judge",
+            "--limit",
+            "1",
+            "--output-json",
+            str(output_json),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(output_json.read_text(encoding="utf-8"))
+    assert report["status"] == "passed"
+    assert report["dataset"]["pipeline_report"] == str(pipeline_report)
+    assert report["cases"][0]["answer_source"] == "generated_answer"
 
 
 def test_judged_ragas_cli_reports_not_configured_without_mock(tmp_path):

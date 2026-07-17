@@ -65,31 +65,70 @@ def load_answer_generation_cases(
     *,
     limit: int | None = None,
     answer_policy: str = "reference",
+    pipeline_report: Path | None = None,
 ) -> list[JudgedRagasCase]:
     if answer_policy not in {"generated", "reference"}:
         raise ValueError("answer_policy must be 'generated' or 'reference'")
+    if answer_policy == "generated" and pipeline_report is None:
+        raise ValueError(
+            "pipeline_report is required when answer_policy is 'generated'"
+        )
     if limit is not None and limit <= 0:
         return []
 
     rows = load_jsonl(dataset_dir / "ragas_cases.combined.jsonl")
+    pipeline_cases: dict[str, dict[str, Any]] = {}
+    if pipeline_report is not None:
+        payload = json.loads(pipeline_report.read_text(encoding="utf-8"))
+        pipeline_cases = {
+            str(row["case_id"]): row
+            for row in payload.get("cases", [])
+        }
     cases: list[JudgedRagasCase] = []
     for row in rows:
         if row.get("dataset_split") != ANSWER_GENERATION_SPLIT:
             continue
 
-        answer = str(row.get("answer") or "").strip()
-        answer_source = "generated_answer"
+        pipeline_case = pipeline_cases.get(str(row["case_id"]))
+        if answer_policy == "generated" and pipeline_case is None:
+            raise ValueError(f"missing current pipeline case {row['case_id']}")
+        if answer_policy == "generated" and pipeline_case is not None:
+            if pipeline_case.get("error"):
+                raise ValueError(f"current pipeline case {row['case_id']} failed")
+            answer = str(pipeline_case.get("answer") or "").strip()
+            if not answer:
+                raise ValueError(
+                    f"current pipeline case {row['case_id']} has no answer"
+                )
+            answer_source = str(
+                pipeline_case.get("answer_source") or "current_pipeline"
+            )
+            if answer_source == "reference_answer_fallback":
+                raise ValueError(
+                    f"current pipeline case {row['case_id']} used reference answer fallback"
+                )
+            if answer_source != "generated_answer":
+                raise ValueError(
+                    f"current pipeline case {row['case_id']} did not use a generated answer"
+                )
+            contexts = [
+                str(context)
+                for context in pipeline_case.get("retrieved_contexts") or []
+                if str(context).strip()
+            ]
+        else:
+            answer = str(row.get("answer") or "").strip()
+            answer_source = "generated_answer"
+            contexts = [
+                str(context)
+                for context in row.get("contexts") or row.get("reference_contexts") or []
+                if str(context).strip()
+            ]
         if not answer and answer_policy == "reference":
             answer = str(row.get("reference_answer") or row.get("ground_truth") or "").strip()
             answer_source = "reference_answer_fallback"
         if not answer:
             continue
-
-        contexts = [
-            str(context)
-            for context in row.get("contexts") or row.get("reference_contexts") or []
-            if str(context).strip()
-        ]
         cases.append(
             JudgedRagasCase(
                 case_id=str(row["case_id"]),

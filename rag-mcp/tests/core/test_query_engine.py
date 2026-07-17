@@ -99,6 +99,7 @@ def test_query_engine_empty_index_returns_no_evidence():
 
     assert response.results == []
     assert response.answer_text == "No evidence found."
+    assert response.answer_source == "no_evidence"
 
 
 def test_query_answer_strips_bom_from_legacy_chunks():
@@ -206,6 +207,7 @@ def test_query_engine_generates_cited_answer_and_traces_success(tmp_path):
     )
 
     assert response.answer_text == "RRF combines ranked lists [C1]."
+    assert response.answer_source == "generated_answer"
     assert [result.citation_id for result in response.results] == ["C1"]
     trace = json.loads(trace_path.read_text(encoding="utf-8").splitlines()[0])
     answer_stage = next(stage for stage in trace["stages"] if stage["name"] == "answer_generation")
@@ -227,6 +229,7 @@ def test_query_engine_falls_back_to_evidence_when_answer_generation_fails(tmp_pa
     )
 
     assert response.answer_text == "Evidence found:\n[C1] Text for c1"
+    assert response.answer_source == "evidence_fallback"
     trace = json.loads(trace_path.read_text(encoding="utf-8").splitlines()[0])
     answer_stage = next(stage for stage in trace["stages"] if stage["name"] == "answer_generation")
     assert answer_stage["details"]["fallback"] is True
@@ -249,6 +252,7 @@ def test_query_engine_traces_fallback_for_invalid_generated_citation(tmp_path):
     )
 
     assert response.answer_text == "Evidence found:\n[C1] Text for c1"
+    assert response.answer_source == "evidence_fallback"
     trace = json.loads(trace_path.read_text(encoding="utf-8").splitlines()[0])
     answer_stage = next(stage for stage in trace["stages"] if stage["name"] == "answer_generation")
     assert answer_stage["details"]["fallback"] is True

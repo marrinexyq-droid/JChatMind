@@ -42,6 +42,11 @@ def main() -> int:
         help="Use generated answers only, or reference answers for judge harness smoke.",
     )
     parser.add_argument(
+        "--pipeline-report",
+        type=Path,
+        help="Current-pipeline JSON report required by --answer-policy generated.",
+    )
+    parser.add_argument(
         "--mock-judge",
         action="store_true",
         help="Use deterministic offline scoring instead of a configured model judge.",
@@ -78,6 +83,7 @@ def main() -> int:
         args.dataset_dir,
         limit=args.limit,
         answer_policy=args.answer_policy,
+        pipeline_report=args.pipeline_report,
     )
     thresholds = JudgeThresholds(
         min_mean_faithfulness=args.min_faithfulness,
@@ -100,6 +106,9 @@ def main() -> int:
     report["dataset"] = {
         "dataset_dir": str(args.dataset_dir),
         "answer_policy": args.answer_policy,
+        "pipeline_report": (
+            str(args.pipeline_report) if args.pipeline_report is not None else None
+        ),
         "limit": args.limit,
     }
     write_report(args.output_json, report)

@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.canary_smoke import run_canary
+from scripts.evaluate_current_pipeline import run_current_pipeline
 from src.evaluation.ragas_cases import as_report_dict, evaluate_dataset
 
 
@@ -32,9 +33,13 @@ def run_acceptance(
     min_mrr: float = 0.95,
     min_precision_at_1: float = 0.90,
     require_chroma: bool = False,
+    current_pipeline: bool = False,
+    answer_policy: str = "reference",
 ) -> dict[str, Any]:
     if ragas_rounds < 1:
         raise ValueError("ragas_rounds must be at least 1")
+    if answer_policy not in {"generated", "reference"}:
+        raise ValueError("answer_policy must be 'generated' or 'reference'")
 
     canary_report = None
     canary_error = None
@@ -47,6 +52,13 @@ def run_acceptance(
         _evaluate_ragas_round(dataset_dir, index + 1)
         for index in range(ragas_rounds)
     ]
+    current_pipeline_report = None
+    current_pipeline_error = None
+    if current_pipeline:
+        try:
+            current_pipeline_report = _run_current_pipeline(dataset_dir, collection)
+        except Exception as exc:
+            current_pipeline_error = str(exc)
     report = _build_report(
         canary_report=canary_report,
         canary_error=canary_error,
@@ -58,6 +70,10 @@ def run_acceptance(
         min_mrr=min_mrr,
         min_precision_at_1=min_precision_at_1,
         require_chroma=require_chroma,
+        current_pipeline=current_pipeline,
+        answer_policy=answer_policy,
+        current_pipeline_report=current_pipeline_report,
+        current_pipeline_error=current_pipeline_error,
     )
 
     if output_json is not None:
@@ -88,6 +104,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-mrr", type=float, default=0.95)
     parser.add_argument("--min-precision-at-1", type=float, default=0.90)
     parser.add_argument("--require-chroma", action="store_true")
+    parser.add_argument("--current-pipeline", action="store_true")
+    parser.add_argument(
+        "--answer-policy",
+        choices=["generated", "reference"],
+        default="reference",
+    )
     args = parser.parse_args(argv)
 
     report = run_acceptance(
@@ -102,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
         min_mrr=args.min_mrr,
         min_precision_at_1=args.min_precision_at_1,
         require_chroma=args.require_chroma,
+        current_pipeline=args.current_pipeline,
+        answer_policy=args.answer_policy,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if report["status"] == "passed" else 1
@@ -124,6 +148,14 @@ def _evaluate_ragas_round(dataset_dir: Path, round_number: int) -> dict[str, Any
     }
 
 
+def _run_current_pipeline(dataset_dir: Path, collection: str) -> dict[str, Any]:
+    return run_current_pipeline(
+        project_root=PROJECT_ROOT,
+        dataset_dir=dataset_dir,
+        collection=collection,
+    )
+
+
 def _build_report(
     *,
     canary_report: dict[str, Any] | None,
@@ -136,6 +168,10 @@ def _build_report(
     min_mrr: float,
     min_precision_at_1: float,
     require_chroma: bool,
+    current_pipeline: bool,
+    answer_policy: str,
+    current_pipeline_report: dict[str, Any] | None,
+    current_pipeline_error: str | None,
 ) -> dict[str, Any]:
     first_report = ragas_reports[0]["report"]
     hashes = [row["sha256"] for row in ragas_reports]
@@ -191,15 +227,99 @@ def _build_report(
                 ),
             ]
         )
+    if current_pipeline:
+        pipeline_cases = (
+            current_pipeline_report.get("cases", [])
+            if current_pipeline_report is not None
+            else []
+        )
+        case_errors = [case for case in pipeline_cases if case.get("error")]
+        empty_answers = [
+            case for case in pipeline_cases if not str(case.get("answer") or "").strip()
+        ]
+        reference_fallbacks = [
+            case
+            for case in pipeline_cases
+            if case.get("answer_source") == "reference_answer_fallback"
+        ]
+        non_generated_answers = [
+            case
+            for case in pipeline_cases
+            if case.get("answer_source") != "generated_answer"
+        ]
+        actual_backend = (
+            current_pipeline_report.get("vector_store_backend")
+            if current_pipeline_report is not None
+            else None
+        )
+        gates.extend(
+            [
+                _gate(
+                    "current_pipeline_executed",
+                    current_pipeline_report is not None,
+                    observed=current_pipeline_error,
+                ),
+                _gate(
+                    "current_pipeline_generated_answers",
+                    current_pipeline_report is not None
+                    and answer_policy == "generated"
+                    and not non_generated_answers,
+                    observed={
+                        "answer_policy": answer_policy,
+                        "non_generated_count": len(non_generated_answers),
+                    },
+                    threshold={
+                        "answer_policy": "generated",
+                        "non_generated_count": 0,
+                    },
+                ),
+                _gate(
+                    "current_pipeline_cases_present",
+                    current_pipeline_report is not None and bool(pipeline_cases),
+                    observed=len(pipeline_cases),
+                    threshold=">=1",
+                ),
+                _gate(
+                    "current_pipeline_no_case_errors",
+                    current_pipeline_report is not None and not case_errors,
+                    observed=len(case_errors),
+                    threshold=0,
+                ),
+                _gate(
+                    "current_pipeline_nonempty_answers",
+                    current_pipeline_report is not None and not empty_answers,
+                    observed=len(empty_answers),
+                    threshold=0,
+                ),
+                _gate(
+                    "current_pipeline_no_reference_fallback",
+                    current_pipeline_report is not None and not reference_fallbacks,
+                    observed=len(reference_fallbacks),
+                    threshold=0,
+                ),
+                _gate(
+                    "current_pipeline_chroma_backend",
+                    actual_backend == "ChromaVectorStore",
+                    observed=actual_backend or current_pipeline_error,
+                    threshold="ChromaVectorStore",
+                ),
+            ]
+        )
 
     status = "passed" if all(gate["status"] != "failed" for gate in gates) else "failed"
     return {
         "status": status,
-        "version": "2.2",
+        "version": "2.7",
         "canary": {
             "skipped": smoke_skipped,
             "report": canary_report,
             "error": canary_error,
+        },
+        "current_pipeline": {
+            "enabled": current_pipeline,
+            "answer_policy": answer_policy,
+            "report": current_pipeline_report,
+            "error": current_pipeline_error,
         },
         "ragas": {
             "rounds": [

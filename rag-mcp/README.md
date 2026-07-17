@@ -153,14 +153,17 @@ protocol responses on stdout so MCP clients can consume them.
 
 ## Convergence status
 
-The 2026-07-13 convergence implementation has completed Tasks 1–6: workspace
+The convergence implementation has completed the code for Tasks 1–7: workspace
 cleanup, repository secret gates, a frozen Python 3.11/uv environment, runtime
 embedding selection, fail-closed index integrity, Markdown/PDF ingestion, and
-citation-constrained answer generation. The latest complete Python run recorded
-136 passing tests. Live-pipeline evaluation, cross-runtime trace propagation,
-frontend baseline repair, burn-in/default cutover, dashboard actions, and MCP
-resources remain pending, so the default Java fallback is intentionally still
-enabled.
+citation-constrained answer generation, followed by current-pipeline evaluation
+and strict generated-answer gates. The latest complete Python run recorded 157
+passing tests. A real strict evaluation still requires an indexed collection,
+Ollama embedding and LLM endpoints, and Chroma; missing runtime dependencies
+produce a failed report instead of a reference-answer or SQLite release pass.
+Cross-runtime trace propagation, frontend baseline repair, burn-in/default
+cutover, dashboard actions, and MCP resources remain pending, so the default
+Java fallback is intentionally still enabled.
 
 Version 1.0 is complete when tests pass and the evaluation script reports whether
 the existing Java RAG baseline report and the optional `ragas` package are
@@ -285,6 +288,43 @@ runtime gate:
 python scripts/canary_smoke.py --require-chroma
 python scripts/canary_acceptance.py --require-chroma --ragas-rounds 3
 ```
+
+Version 2.7 runs answer-generation cases through the current QueryEngine and
+writes results separately from the static observation baseline:
+
+```bash
+python scripts/evaluate_current_pipeline.py \
+  --collection rag-canary \
+  --output-json output/metrics/current_pipeline.json
+```
+
+Each case records retrieved chunk IDs and text, answer provenance, latency, and
+errors. `SearchResponse.answer_source` distinguishes `generated_answer`,
+`evidence_fallback`, and `no_evidence`. Judge-RAGAS generated mode must read the
+current report and refuses missing cases, errors, blank answers, or fallback
+answers:
+
+```bash
+python scripts/evaluate_ragas_judged.py \
+  --answer-policy generated \
+  --pipeline-report output/metrics/current_pipeline.json \
+  --mock-judge
+```
+
+The strict acceptance path is:
+
+```bash
+python scripts/canary_acceptance.py \
+  --require-chroma \
+  --current-pipeline \
+  --answer-policy generated \
+  --ragas-rounds 3
+```
+
+This gate fails when no Golden cases ran, any case errored, an answer is blank,
+an answer used reference/evidence fallback, or the live vector backend is
+SQLite. Static RAGAS observations remain available for harness regression, but
+they cannot satisfy the current-pipeline release gate.
 
 Validate dashboard inputs without Streamlit:
 

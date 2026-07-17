@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from src.core.answer_generator import AnswerGenerator, EvidenceFallback, build_evidence_answer
 from src.core.types import RetrievalResult, SearchRequest
@@ -15,10 +16,14 @@ from src.storage.sparse_index import SqliteSparseIndex
 from src.storage.vector_store import VectorStore
 
 
+AnswerSource = Literal["generated_answer", "evidence_fallback", "no_evidence"]
+
+
 @dataclass(frozen=True)
 class SearchResponse:
     answer_text: str
     results: list[RetrievalResult] = field(default_factory=list)
+    answer_source: AnswerSource = "evidence_fallback"
 
 
 class QueryEngine:
@@ -60,7 +65,10 @@ class QueryEngine:
             },
         )
         if not request.query.strip():
-            response = SearchResponse(answer_text="No evidence found.")
+            response = SearchResponse(
+                answer_text="No evidence found.",
+                answer_source="no_evidence",
+            )
             self._write_trace(trace)
             return response
 
@@ -160,11 +168,13 @@ class QueryEngine:
             for index, result in enumerate(results, start=1)
         ]
         answer_text = _build_answer(cited)
+        answer_source: AnswerSource = "evidence_fallback" if cited else "no_evidence"
         if cited and self.answer_generator is not None:
             try:
                 generated_answer = self.answer_generator.generate(request.query, cited)
                 fallback = isinstance(generated_answer, EvidenceFallback)
                 answer_text = _build_answer(cited) if fallback else generated_answer
+                answer_source = "evidence_fallback" if fallback else "generated_answer"
                 details = {"fallback": fallback}
                 if fallback:
                     details["reason"] = generated_answer.reason
@@ -180,7 +190,11 @@ class QueryEngine:
                     method=self.answer_generator.__class__.__name__,
                     details={"fallback": True, "error": "answer generation failed"},
                 )
-        response = SearchResponse(answer_text=answer_text, results=cited)
+        response = SearchResponse(
+            answer_text=answer_text,
+            results=cited,
+            answer_source=answer_source,
+        )
         self._write_trace(trace)
         return response
 
