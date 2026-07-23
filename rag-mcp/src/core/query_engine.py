@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from src.core.answer_generator import AnswerGenerator, EvidenceFallback, build_evidence_answer
 from src.core.types import RetrievalResult, SearchRequest
@@ -24,6 +24,8 @@ class SearchResponse:
     answer_text: str
     results: list[RetrievalResult] = field(default_factory=list)
     answer_source: AnswerSource = "evidence_fallback"
+    trace_id: str | None = None
+    trace_stages: list[dict[str, Any]] = field(default_factory=list)
 
 
 class QueryEngine:
@@ -64,13 +66,18 @@ class QueryEngine:
                 "mode": request.mode,
             },
         )
+        trace.record_stage(
+            "query_processing",
+            method="SearchRequest",
+            details={"mode": request.mode, "top_k": request.top_k},
+        )
         if not request.query.strip():
-            response = SearchResponse(
+            return self._build_response(
+                trace,
                 answer_text="No evidence found.",
+                results=[],
                 answer_source="no_evidence",
             )
-            self._write_trace(trace)
-            return response
 
         retrieval_limit = request.top_k
         if request.mode == "hybrid-rerank":
@@ -100,7 +107,11 @@ class QueryEngine:
             trace.record_stage(
                 "dense_retrieval",
                 method=self.vector_store.__class__.__name__,
-                details={"count": len(dense), "limit": retrieval_limit},
+                details={
+                    "count": len(dense),
+                    "limit": retrieval_limit,
+                    "results": _trace_results(dense),
+                },
             )
         if self.sparse_index is not None and request.mode in {"hybrid", "hybrid-rerank"}:
             sparse = self.sparse_index.search(
@@ -111,7 +122,11 @@ class QueryEngine:
             trace.record_stage(
                 "sparse_retrieval",
                 method=self.sparse_index.__class__.__name__,
-                details={"count": len(sparse), "limit": retrieval_limit},
+                details={
+                    "count": len(sparse),
+                    "limit": retrieval_limit,
+                    "results": _trace_results(sparse),
+                },
             )
 
         if request.mode == "vector":
@@ -121,7 +136,12 @@ class QueryEngine:
             trace.record_stage(
                 "fusion",
                 method="reciprocal_rank_fusion",
-                details={"count": len(results), "rrf_k": self.rrf_k, "limit": retrieval_limit},
+                details={
+                    "count": len(results),
+                    "rrf_k": self.rrf_k,
+                    "limit": retrieval_limit,
+                    "results": _trace_results(results),
+                },
             )
         else:
             results = (dense or sparse)[:retrieval_limit]
@@ -138,6 +158,7 @@ class QueryEngine:
                             "candidate_count": candidate_count,
                             "selected_count": len(results),
                             "fallback": False,
+                            "results": _trace_results(results),
                         },
                     )
                 except Exception as exc:
@@ -149,11 +170,35 @@ class QueryEngine:
                             "selected_count": min(candidate_count, request.top_k),
                             "fallback": True,
                             "error": str(exc),
+                            "results": _trace_results(results[: request.top_k]),
                         },
                     )
                     results = results[: request.top_k]
+            elif self.reranker is None:
+                candidate_count = len(results)
+                results = results[: request.top_k]
+                trace.record_stage(
+                    "rerank",
+                    method="not_configured",
+                    details={
+                        "candidate_count": candidate_count,
+                        "selected_count": len(results),
+                        "fallback": True,
+                        "results": _trace_results(results),
+                    },
+                )
             else:
                 results = results[: request.top_k]
+                trace.record_stage(
+                    "rerank",
+                    method=self.reranker.__class__.__name__,
+                    details={
+                        "candidate_count": 0,
+                        "selected_count": 0,
+                        "fallback": False,
+                        "results": [],
+                    },
+                )
 
         cited = [
             RetrievalResult(
@@ -190,18 +235,86 @@ class QueryEngine:
                     method=self.answer_generator.__class__.__name__,
                     details={"fallback": True, "error": "answer generation failed"},
                 )
-        response = SearchResponse(
+        return self._build_response(
+            trace,
             answer_text=answer_text,
             results=cited,
             answer_source=answer_source,
         )
-        self._write_trace(trace)
-        return response
 
-    def _write_trace(self, trace: TraceContext) -> None:
+    def _build_response(
+        self,
+        trace: TraceContext,
+        *,
+        answer_text: str,
+        results: list[RetrievalResult],
+        answer_source: AnswerSource,
+    ) -> SearchResponse:
+        trace.record_stage(
+            "response_build",
+            method="SearchResponse",
+            details={
+                "result_count": len(results),
+                "answer_source": answer_source,
+                "results": _trace_results(results),
+            },
+        )
+        trace_payload = trace.finish()
         if self.trace_writer is not None:
-            self.trace_writer.write(trace.finish())
+            self.trace_writer.write(trace_payload)
+        return SearchResponse(
+            answer_text=answer_text,
+            results=results,
+            answer_source=answer_source,
+            trace_id=trace.trace_id,
+            trace_stages=_public_trace_stages(trace_payload["stages"]),
+        )
 
 
 def _build_answer(results: list[RetrievalResult]) -> str:
     return build_evidence_answer(results)
+
+
+def _trace_results(results: list[RetrievalResult]) -> list[dict[str, Any]]:
+    return [
+        {
+            "chunk_id": result.chunk_id,
+            "document_id": result.document_id,
+            "score": round(result.score, 6),
+            "source": result.source,
+            "citation_id": result.citation_id,
+        }
+        for result in results
+    ]
+
+
+def _public_trace_stages(
+    stages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    safe_detail_keys = {
+        "mode",
+        "top_k",
+        "count",
+        "limit",
+        "rrf_k",
+        "candidate_count",
+        "selected_count",
+        "fallback",
+        "result_count",
+        "answer_source",
+        "results",
+    }
+    return [
+        {
+            "name": stage.get("name"),
+            "method": stage.get("method"),
+            "provider": stage.get("provider"),
+            "details": {
+                key: value
+                for key, value in (stage.get("details") or {}).items()
+                if key in safe_detail_keys
+            },
+            "elapsed_ms": stage.get("elapsed_ms"),
+        }
+        for stage in stages
+    ]

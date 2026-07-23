@@ -190,6 +190,42 @@ def test_hybrid_rerank_falls_back_to_fused_candidates_and_traces_error(tmp_path)
     assert rerank_stage["details"]["fallback"] is True
     assert rerank_stage["details"]["candidate_count"] == 2
     assert "reranker unavailable" in rerank_stage["details"]["error"]
+    public_rerank_stage = next(
+        stage for stage in response.trace_stages if stage["name"] == "rerank"
+    )
+    assert public_rerank_stage["details"]["fallback"] is True
+    assert public_rerank_stage["details"]["results"][0]["chunk_id"] == "c1"
+    assert "error" not in public_rerank_stage["details"]
+    assert response.trace_id == trace["trace_id"]
+
+
+def test_hybrid_rerank_traces_not_configured_as_real_fallback(tmp_path):
+    engine = QueryEngine(
+        vector_store=FakeVectorStore(
+            [_result("c1", 0.9, "vector"), _result("c2", 0.8, "vector")]
+        ),
+        embedding_provider=FakeEmbeddingProvider(),
+        history_db=tmp_path / "history.db",
+        reranker=None,
+    )
+
+    response = engine.search(
+        SearchRequest(
+            query="rerank without provider",
+            collection="war-room",
+            top_k=1,
+            mode="hybrid-rerank",
+        )
+    )
+
+    rerank_stage = next(
+        stage for stage in response.trace_stages if stage["name"] == "rerank"
+    )
+    assert rerank_stage["method"] == "not_configured"
+    assert rerank_stage["details"]["candidate_count"] == 2
+    assert rerank_stage["details"]["selected_count"] == 1
+    assert rerank_stage["details"]["fallback"] is True
+    assert rerank_stage["details"]["results"][0]["chunk_id"] == "c1"
 
 
 def test_query_engine_generates_cited_answer_and_traces_success(tmp_path):
@@ -235,6 +271,12 @@ def test_query_engine_falls_back_to_evidence_when_answer_generation_fails(tmp_pa
     assert answer_stage["details"]["fallback"] is True
     assert answer_stage["details"]["error"] == "answer generation failed"
     assert "test-only-key" not in json.dumps(trace)
+    assert response.trace_id == trace["trace_id"]
+    assert "test-only-key" not in json.dumps(response.trace_stages)
+    public_answer_stage = next(
+        stage for stage in response.trace_stages if stage["name"] == "answer_generation"
+    )
+    assert "error" not in public_answer_stage["details"]
 
 
 def test_query_engine_traces_fallback_for_invalid_generated_citation(tmp_path):

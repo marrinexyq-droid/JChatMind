@@ -72,8 +72,15 @@ def test_mcp_server_lists_tools_and_calls_query(tmp_path):
 
     result = response["result"]
     assert result["isError"] is False
-    assert result["structuredContent"]["result_count"] == 1
-    assert "MCP tools expose" in result["structuredContent"]["citations"][0]["text"]
+    payload = result["structuredContent"]
+    assert payload["result_count"] == 1
+    assert "MCP tools expose" in payload["citations"][0]["text"]
+    assert payload["trace_id"]
+    stages = {stage["name"]: stage for stage in payload["trace_stages"]}
+    assert {"query_processing", "dense_retrieval", "sparse_retrieval", "fusion", "response_build"} <= set(stages)
+    assert stages["dense_retrieval"]["details"]["results"][0]["chunk_id"]
+    assert stages["sparse_retrieval"]["details"]["results"][0]["chunk_id"]
+    assert stages["response_build"]["details"]["results"][0]["citation_id"] == "C1"
     assert "Evidence found:" in result["content"][0]["text"]
 
 

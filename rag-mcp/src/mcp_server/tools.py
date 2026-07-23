@@ -58,6 +58,8 @@ class KnowledgeHub:
                 "mode": mode,
                 "result_count": len(response.results),
                 "citations": citations,
+                "trace_id": response.trace_id,
+                "trace_stages": response.trace_stages,
             },
         )
 

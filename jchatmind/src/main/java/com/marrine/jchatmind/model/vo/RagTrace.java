@@ -12,6 +12,8 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class RagTrace {
+    private String traceId;
+    private Boolean partial;
     private String query;
     private String originalQuery;
     private String plannedQuery;

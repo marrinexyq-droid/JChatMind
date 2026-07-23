@@ -125,7 +125,7 @@ public class PythonRagMcpClient {
 
         return Optional.of(RagSearchResult.builder()
                 .chunks(chunks)
-                .trace(buildTrace(kbId, plan, chunks))
+                .trace(buildTrace(structured, kbId, plan, chunks))
                 .build());
     }
 
@@ -347,25 +347,50 @@ public class PythonRagMcpClient {
         return values;
     }
 
-    private RagTrace buildTrace(String kbId, QueryPlan plan, List<ScoredChunk> chunks) {
-        List<RagTraceChunk> finalChunks = IntStream.range(0, chunks.size())
-                .mapToObj(index -> {
-                    ScoredChunk chunk = chunks.get(index);
-                    return RagTraceChunk.builder()
-                            .citationId("C" + (index + 1))
-                            .id(chunk.getId())
-                            .kbId(kbId)
-                            .docId(chunk.getDocId())
-                            .documentName(chunk.getDocId())
-                            .contentPreview(preview(chunk.getContent()))
-                            .metadata(chunk.getMetadata())
-                            .matchedBy(List.of("python-mcp"))
-                            .rrfRank(index + 1)
-                            .rrfScore(chunk.getScore())
-                            .finalRank(index + 1)
-                            .build();
-                })
-                .toList();
+    private RagTrace buildTrace(JsonNode structured, String kbId, QueryPlan plan, List<ScoredChunk> chunks) {
+        String traceId = structured.path("trace_id").asText("");
+        JsonNode traceStages = structured.path("trace_stages");
+        if (traceId.isBlank() || !traceStages.isArray() || traceStages.isEmpty()) {
+            return buildLegacyTrace(kbId, plan, chunks);
+        }
+
+        List<RagTraceChunk> finalChunks = buildFinalChunks(kbId, chunks, false);
+        Map<String, RagTraceChunk> finalChunksById = new LinkedHashMap<>();
+        finalChunks.forEach(chunk -> finalChunksById.put(chunk.getId(), chunk));
+        JsonNode rerankStage = findTraceStage(traceStages, "rerank");
+
+        return baseTrace(kbId, plan)
+                .traceId(traceId)
+                .partial(false)
+                .rerankApplied(rerankStage != null)
+                .rerankFallback(rerankStage != null
+                        && rerankStage.path("details").path("fallback").asBoolean(false))
+                .vectorResults(stageChunks(traceStages, "dense_retrieval", kbId, finalChunksById))
+                .bm25Results(stageChunks(traceStages, "sparse_retrieval", kbId, finalChunksById))
+                .rrfResults(stageChunks(traceStages, "fusion", kbId, finalChunksById))
+                .graphExpandedChunks(List.of())
+                .rerankResults(stageChunks(traceStages, "rerank", kbId, finalChunksById))
+                .finalChunks(finalChunks)
+                .build();
+    }
+
+    private RagTrace buildLegacyTrace(String kbId, QueryPlan plan, List<ScoredChunk> chunks) {
+        List<RagTraceChunk> finalChunks = buildFinalChunks(kbId, chunks, true);
+        return baseTrace(kbId, plan)
+                .traceId(null)
+                .partial(true)
+                .rerankApplied("hybrid-rerank".equals(plan.effectiveMode()))
+                .rerankFallback(false)
+                .vectorResults(List.of())
+                .bm25Results(List.of())
+                .rrfResults(finalChunks)
+                .graphExpandedChunks(List.of())
+                .rerankResults(List.of())
+                .finalChunks(finalChunks)
+                .build();
+    }
+
+    private RagTrace.RagTraceBuilder baseTrace(String kbId, QueryPlan plan) {
         return RagTrace.builder()
                 .query(plan.effectiveSearchQuery())
                 .originalQuery(plan.getOriginalQuery())
@@ -378,16 +403,103 @@ public class PythonRagMcpClient {
                 .vectorWeight(plan.effectiveVectorWeight())
                 .bm25Weight(plan.effectiveBm25Weight())
                 .graphExpansionEnabled(false)
-                .graphMaxHops(0)
-                .rerankApplied("hybrid-rerank".equals(plan.effectiveMode()))
-                .rerankFallback(false)
-                .vectorResults(List.of())
-                .bm25Results(List.of())
-                .rrfResults(finalChunks)
-                .graphExpandedChunks(List.of())
-                .rerankResults(List.of())
-                .finalChunks(finalChunks)
-                .build();
+                .graphMaxHops(0);
+    }
+
+    private List<RagTraceChunk> buildFinalChunks(
+            String kbId,
+            List<ScoredChunk> chunks,
+            boolean includeSyntheticRrf
+    ) {
+        List<RagTraceChunk> finalChunks = IntStream.range(0, chunks.size())
+                .mapToObj(index -> {
+                    ScoredChunk chunk = chunks.get(index);
+                    RagTraceChunk.RagTraceChunkBuilder builder = RagTraceChunk.builder()
+                            .citationId("C" + (index + 1))
+                            .id(chunk.getId())
+                            .kbId(kbId)
+                            .docId(chunk.getDocId())
+                            .documentName(chunk.getDocId())
+                            .contentPreview(preview(chunk.getContent()))
+                            .metadata(chunk.getMetadata())
+                            .matchedBy(List.of("python-mcp"))
+                            .finalRank(index + 1);
+                    if (includeSyntheticRrf) {
+                        builder.rrfRank(index + 1).rrfScore(chunk.getScore());
+                    }
+                    return builder.build();
+                })
+                .toList();
+        return finalChunks;
+    }
+
+    private JsonNode findTraceStage(JsonNode traceStages, String stageName) {
+        for (JsonNode stage : traceStages) {
+            if (stageName.equals(stage.path("name").asText(""))) {
+                return stage;
+            }
+        }
+        return null;
+    }
+
+    private List<RagTraceChunk> stageChunks(
+            JsonNode traceStages,
+            String stageName,
+            String kbId,
+            Map<String, RagTraceChunk> finalChunksById
+    ) {
+        JsonNode stage = findTraceStage(traceStages, stageName);
+        if (stage == null) {
+            return List.of();
+        }
+        JsonNode results = stage.path("details").path("results");
+        if (!results.isArray()) {
+            return List.of();
+        }
+
+        List<RagTraceChunk> chunks = new ArrayList<>();
+        for (int index = 0; index < results.size(); index++) {
+            JsonNode result = results.get(index);
+            String chunkId = result.path("chunk_id").asText("");
+            if (chunkId.isBlank()) {
+                continue;
+            }
+            RagTraceChunk finalChunk = finalChunksById.get(chunkId);
+            double score = result.path("score").asDouble(0.0);
+            RagTraceChunk.RagTraceChunkBuilder builder = RagTraceChunk.builder()
+                    .citationId(result.path("citation_id").asText(
+                            finalChunk == null ? null : finalChunk.getCitationId()))
+                    .id(chunkId)
+                    .kbId(kbId)
+                    .docId(result.path("document_id").asText(
+                            finalChunk == null ? "" : finalChunk.getDocId()))
+                    .documentName(finalChunk == null
+                            ? result.path("document_id").asText("")
+                            : finalChunk.getDocumentName())
+                    .contentPreview(finalChunk == null ? "" : finalChunk.getContentPreview())
+                    .metadata(finalChunk == null ? "{}" : finalChunk.getMetadata())
+                    .matchedBy(List.of(stageName));
+            applyStageRank(builder, stageName, index + 1, score);
+            chunks.add(builder.build());
+        }
+        return List.copyOf(chunks);
+    }
+
+    private void applyStageRank(
+            RagTraceChunk.RagTraceChunkBuilder builder,
+            String stageName,
+            int rank,
+            double score
+    ) {
+        switch (stageName) {
+            case "dense_retrieval" -> builder.vectorRank(rank).vectorScore(score);
+            case "sparse_retrieval" -> builder.bm25Rank(rank).bm25Score(score);
+            case "fusion" -> builder.rrfRank(rank).rrfScore(score);
+            case "rerank" -> builder.rerankRank(rank).rerankScore(score);
+            default -> {
+                // Unknown stages are not mapped into the stable RagTrace interface.
+            }
+        }
     }
 
     private String preview(String content) {
