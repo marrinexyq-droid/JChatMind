@@ -13,7 +13,7 @@ import {
   getOptionalTools,
   type ToolVO,
 } from "../../api/api.ts";
-import { useKnowledgeBases } from "../../hooks/useKnowledgeBases.tsx";
+import { useKnowledgeBases } from "../../hooks/useKnowledgeBases.ts";
 
 interface AddAgentModalProps {
   open: boolean;

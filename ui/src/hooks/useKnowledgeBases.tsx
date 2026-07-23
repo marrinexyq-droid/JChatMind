@@ -1,21 +1,11 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   createKnowledgeBase,
   type CreateKnowledgeBaseRequest,
   getKnowledgeBases,
 } from "../api/api.ts";
 import type { KnowledgeBase } from "../types";
-
-interface KnowledgeBaseContextType {
-  knowledgeBases: KnowledgeBase[];
-  createKnowledgeBaseHandle: (
-    request: CreateKnowledgeBaseRequest,
-  ) => Promise<void>;
-}
-
-const KnowledgeBaseContext = createContext<
-  KnowledgeBaseContextType | undefined
->(undefined);
+import { KnowledgeBaseContext } from "./useKnowledgeBases.ts";
 
 export function KnowledgeBaseProvider({
   children,
@@ -58,14 +48,4 @@ export function KnowledgeBaseProvider({
       {children}
     </KnowledgeBaseContext.Provider>
   );
-}
-
-export function useKnowledgeBases(): KnowledgeBaseContextType {
-  const context = useContext(KnowledgeBaseContext);
-  if (context === undefined) {
-    throw new Error(
-      "useKnowledgeBases must be used within a KnowledgeBaseProvider",
-    );
-  }
-  return context;
 }

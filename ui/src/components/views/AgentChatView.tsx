@@ -10,7 +10,7 @@ import {
   getChatSession,
 } from "../../api/api.ts";
 import { BASE_URL } from "../../api/http.ts";
-import { useAgents } from "../../hooks/useAgents.tsx";
+import { useAgents } from "../../hooks/useAgents.ts";
 import { useChatSessions } from "../../hooks/useChatSessions.ts";
 import { useUniversePipeline } from "../../contexts/UniversePipelineContext.tsx";
 import EmptyAgentChatView from "./agentChatView/EmptyAgentChatView.tsx";

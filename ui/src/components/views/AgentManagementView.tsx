@@ -4,7 +4,7 @@ import { Button, Popconfirm, Empty, Typography, message } from "antd";
 import {
   RobotOutlined, PlusOutlined, EditOutlined, DeleteOutlined, MessageOutlined,
 } from "@ant-design/icons";
-import { useAgents } from "../../hooks/useAgents.tsx";
+import { useAgents } from "../../hooks/useAgents.ts";
 import { getAgentEmoji } from "../../utils";
 import type { AgentVO } from "../../api/api.ts";
 

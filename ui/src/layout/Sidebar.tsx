@@ -68,7 +68,7 @@ export default function Sidebar({ children, collapsed, onToggle }: SidebarProps)
             icon={<PlusOutlined />}
             label="新对话"
             onClick={() => {
-              (window as any).petActions?.setCurious?.();
+              window.petActions?.setCurious?.();
               navigate("/chat");
             }}
           />
@@ -77,7 +77,7 @@ export default function Sidebar({ children, collapsed, onToggle }: SidebarProps)
             label="智能体管理"
             active={location.pathname.startsWith("/agent")}
             onClick={() => {
-              (window as any).petActions?.setCurious?.();
+              window.petActions?.setCurious?.();
               navigate("/agent");
             }}
           />
@@ -86,7 +86,7 @@ export default function Sidebar({ children, collapsed, onToggle }: SidebarProps)
             label="知识库"
             active={location.pathname.startsWith("/knowledge-base")}
             onClick={() => {
-              (window as any).petActions?.setCurious?.();
+              window.petActions?.setCurious?.();
               navigate("/knowledge-base");
             }}
           />

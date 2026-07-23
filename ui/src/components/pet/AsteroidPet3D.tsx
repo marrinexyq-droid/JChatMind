@@ -1,8 +1,8 @@
 import { useRef, useMemo, useCallback } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
-import { ASTEROID_MORPHS, simpleNoise, generateCrackTexture } from './asteroidData';
-import type { PetState } from './PetContext';
+import { ASTEROID_MORPHS, simpleNoise, generateCrackTexture, seededRandom } from './asteroidData';
+import type { PetState } from './usePet';
 
 interface AsteroidPet3DProps {
   state: PetState;
@@ -10,6 +10,54 @@ interface AsteroidPet3DProps {
   isDragging: boolean;
   onClick: () => void;
 }
+
+const CRYSTAL_SPIKE_COUNT = 8;
+const ICE_PARTICLE_COUNT = 40;
+const THRUSTER_PARTICLE_COUNT = 30;
+
+function createCrystalSpikes() {
+  const random = seededRandom(3107);
+  return Array.from({ length: CRYSTAL_SPIKE_COUNT }, (_, index) => ({
+    angle: (index / CRYSTAL_SPIKE_COUNT) * Math.PI * 2,
+    height: 0.3 + random() * 0.4,
+    radius: 0.05 + random() * 0.03,
+    tilt: random() * 0.3,
+  }));
+}
+
+function createIcePositions(): Float32Array {
+  const random = seededRandom(8471);
+  const positions = new Float32Array(ICE_PARTICLE_COUNT * 3);
+  for (let index = 0; index < ICE_PARTICLE_COUNT; index++) {
+    positions[index * 3] = (random() - 0.5) * 0.5;
+    positions[index * 3 + 1] = -0.8 - index * 0.08;
+    positions[index * 3 + 2] = (random() - 0.5) * 0.5;
+  }
+  return positions;
+}
+
+function createDebrisData(count: number, seed: number) {
+  const random = seededRandom(seed);
+  return Array.from({ length: count }, (_, index) => ({
+    angle: (index / count) * Math.PI * 2,
+    distance: 1.4 + random() * 0.4,
+    size: 0.08 + random() * 0.12,
+    speed: 0.3 + random() * 0.5,
+  }));
+}
+
+function createThrusterPositions(seed: number): Float32Array {
+  const random = seededRandom(seed);
+  const positions = new Float32Array(THRUSTER_PARTICLE_COUNT * 3);
+  for (let index = 0; index < THRUSTER_PARTICLE_COUNT; index++) {
+    positions[index * 3] = (random() - 0.5) * 0.3;
+    positions[index * 3 + 1] = -1.2 - random() * 1.5;
+    positions[index * 3 + 2] = (random() - 0.5) * 0.3;
+  }
+  return positions;
+}
+
+const CRYSTAL_SPIKES = createCrystalSpikes();
 
 // ─── 形态专属 Appendages ───
 
@@ -106,18 +154,11 @@ function VolcanicAppendages({ state }: { state: PetState }) {
 function CrystalAppendages({ state }: { state: PetState }) {
   const spikesRef = useRef<THREE.Group>(null);
 
-  const spikes = useMemo(() => Array.from({ length: 8 }, (_, i) => ({
-    angle: (i / 8) * Math.PI * 2,
-    height: 0.3 + Math.random() * 0.4,
-    radius: 0.05 + Math.random() * 0.03,
-    tilt: Math.random() * 0.3,
-  })), []);
-
   useFrame((state_frame) => {
     const t = state_frame.clock.elapsedTime;
     if (spikesRef.current) {
       spikesRef.current.children.forEach((child, i) => {
-        const s = spikes[i];
+        const s = CRYSTAL_SPIKES[i];
         const resonance = state === 'happy' ? Math.sin(t * 10 + i) * 0.1 : 0;
         child.rotation.z = s.tilt + resonance;
         (child as THREE.Mesh).material = new THREE.MeshStandardMaterial({
@@ -135,7 +176,7 @@ function CrystalAppendages({ state }: { state: PetState }) {
 
   return (
     <group ref={spikesRef}>
-      {spikes.map((s, i) => (
+      {CRYSTAL_SPIKES.map((s, i) => (
         <mesh
           key={i}
           position={[
@@ -164,23 +205,13 @@ function CrystalAppendages({ state }: { state: PetState }) {
 // 彗星：冰晶尾迹
 function IceAppendages({ state }: { state: PetState }) {
   const tailRef = useRef<THREE.Points>(null);
-  const count = 40;
-
-  const positions = useMemo(() => {
-    const pos = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 0.5;
-      pos[i * 3 + 1] = -0.8 - i * 0.08;
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
-    }
-    return pos;
-  }, []);
+  const positions = useMemo(() => createIcePositions(), []);
 
   useFrame(() => {
     if (!tailRef.current) return;
     const posAttr = tailRef.current.geometry.attributes.position;
     const speed = state === 'happy' ? 0.05 : state === 'sleep' ? 0.005 : 0.02;
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < ICE_PARTICLE_COUNT; i++) {
       let y = posAttr.getY(i);
       y -= speed;
       if (y < -4) {
@@ -342,7 +373,7 @@ function AsteroidBody({ morph, state }: { morph: (typeof ASTEROID_MORPHS)[0]; st
       default:
         return { roughness: morph.roughness, metalness: morph.metalness };
     }
-  }, [morph.theme]);
+  }, [morph.theme, morph.roughness, morph.metalness]);
 
   return (
     <mesh ref={meshRef} geometry={geometry}>
@@ -361,13 +392,10 @@ function AsteroidBody({ morph, state }: { morph: (typeof ASTEROID_MORPHS)[0]; st
 // ─── 环绕碎片 ───
 function OrbitingDebris({ morph, state }: { morph: (typeof ASTEROID_MORPHS)[0]; state: PetState }) {
   const groupRef = useRef<THREE.Group>(null);
-  const debrisData = useMemo(() =>
-    Array.from({ length: morph.debrisCount }, (_, i) => ({
-      angle: (i / morph.debrisCount) * Math.PI * 2,
-      distance: 1.4 + Math.random() * 0.4,
-      size: 0.08 + Math.random() * 0.12,
-      speed: 0.3 + Math.random() * 0.5,
-    })), [morph.debrisCount]);
+  const debrisData = useMemo(
+    () => createDebrisData(morph.debrisCount, morph.noiseSeed + 1701),
+    [morph.debrisCount, morph.noiseSeed],
+  );
 
   useFrame((_, delta) => {
     if (!groupRef.current) return;
@@ -409,25 +437,18 @@ function OrbitingDebris({ morph, state }: { morph: (typeof ASTEROID_MORPHS)[0]; 
 }
 
 // ─── 推进器尾焰 ───
-function ThrusterTrail({ morph, state }: { morph: (typeof ASTEROID_MORPHS)[0]; state: PetState }) {
-  if (!morph.hasThruster) return null;
+function ActiveThrusterTrail({ morph, state }: { morph: (typeof ASTEROID_MORPHS)[0]; state: PetState }) {
   const particlesRef = useRef<THREE.Points>(null);
-  const count = 30;
-  const positions = useMemo(() => {
-    const pos = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 0.3;
-      pos[i * 3 + 1] = -1.2 - Math.random() * 1.5;
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 0.3;
-    }
-    return pos;
-  }, []);
+  const positions = useMemo(
+    () => createThrusterPositions(morph.noiseSeed + 2903),
+    [morph.noiseSeed],
+  );
 
   useFrame(() => {
     if (!particlesRef.current) return;
     const posAttr = particlesRef.current.geometry.attributes.position;
     const intensity = state === 'happy' ? 2 : state === 'excite' ? 3 : state === 'sleep' ? 0.3 : 1;
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < THRUSTER_PARTICLE_COUNT; i++) {
       let y = posAttr.getY(i);
       y -= 0.02 * intensity;
       if (y < -2.5) {
@@ -448,6 +469,11 @@ function ThrusterTrail({ morph, state }: { morph: (typeof ASTEROID_MORPHS)[0]; s
       <pointsMaterial size={0.06} color={morph.thrusterColor} transparent opacity={0.8} sizeAttenuation depthWrite={false} />
     </points>
   );
+}
+
+function ThrusterTrail({ morph, state }: { morph: (typeof ASTEROID_MORPHS)[0]; state: PetState }) {
+  if (!morph.hasThruster) return null;
+  return <ActiveThrusterTrail morph={morph} state={state} />;
 }
 
 // ─── 传感器眼 ───
@@ -499,7 +525,7 @@ export default function AsteroidPet3D({ state, morphId, isDragging, onClick }: A
     return ASTEROID_MORPHS.find(m => m.id === morphId) || ASTEROID_MORPHS[0];
   }, [morphId]);
 
-  const handleClick = useCallback((e: any) => {
+  const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation?.();
     onClick();
   }, [onClick]);

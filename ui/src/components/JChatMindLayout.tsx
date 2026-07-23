@@ -13,8 +13,8 @@ import { PetProvider } from "./pet/PetContext.tsx";
 import PetOverlay from "./pet/PetOverlay.tsx";
 import AddAgentModal from "./modals/AddAgentModal.tsx";
 import AddKnowledgeBaseModal from "./modals/AddKnowledgeBaseModal.tsx";
-import { useAgents } from "../hooks/useAgents.tsx";
-import { useKnowledgeBases } from "../hooks/useKnowledgeBases.tsx";
+import { useAgents } from "../hooks/useAgents.ts";
+import { useKnowledgeBases } from "../hooks/useKnowledgeBases.ts";
 
 export default function JChatMindLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -44,7 +44,7 @@ export default function JChatMindLayout() {
 
   useEffect(() => {
     const handleClick = () => {
-      (window as any).petActions?.setCurious?.();
+      window.petActions?.setCurious?.();
     };
     window.addEventListener("click", handleClick);
     return () => window.removeEventListener("click", handleClick);
@@ -58,8 +58,6 @@ export default function JChatMindLayout() {
             <TopBar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
             <SideMenu
               onCreateAgentClick={toggleAddAgentModal}
-              onEditAgent={openEditAgentModal}
-              onDeleteAgent={deleteAgentHandle}
               onCreateKnowledgeBaseClick={toggleAddKnowledgeBaseModal}
             />
           </Sidebar>

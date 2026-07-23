@@ -140,7 +140,9 @@ export interface UniversePipelineState {
 declare global {
   interface Window {
     petActions?: {
+      setHappy?: () => void;
       setThink?: () => void;
+      setCurious?: () => void;
       setExcite?: () => void;
     };
   }

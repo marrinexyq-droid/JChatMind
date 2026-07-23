@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Popconfirm } from "antd";
 import { MessageOutlined, DeleteOutlined } from "@ant-design/icons";
 import { useChatSessions } from "../../hooks/useChatSessions.ts";
-import { useAgents } from "../../hooks/useAgents.tsx";
+import { useAgents } from "../../hooks/useAgents.ts";
 
 export default function ChatTabContent() {
   const navigate = useNavigate();

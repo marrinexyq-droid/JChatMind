@@ -1,26 +1,5 @@
-import React, { createContext, useContext, useReducer, useEffect, useState, type ReactNode } from "react";
-
-export type PetState = "idle" | "happy" | "think" | "curious" | "excite" | "sleep";
-
-interface PetStateValue {
-  state: PetState;
-  dispatch: React.Dispatch<PetAction>;
-  triggerAction: (action: PetAction) => void;
-  morphId: string;
-  setMorphId: (id: string) => void;
-}
-
-type PetAction =
-  | { type: "SET_STATE"; payload: PetState }
-  | { type: "IDLE" }
-  | { type: "HAPPY" }
-  | { type: "THINK" }
-  | { type: "CURIOUS" }
-  | { type: "EXCITE" }
-  | { type: "SLEEP" }
-  | { type: "TOGGLE" };
-
-const PetContext = createContext<PetStateValue | null>(null);
+import { useReducer, useEffect, useState, type FC, type ReactNode } from "react";
+import { PetContext, type PetAction, type PetState } from "./usePet";
 
 const petStateReducer = (state: PetState, action: PetAction): PetState => {
   switch (action.type) {
@@ -50,7 +29,7 @@ interface PetProviderProps {
 let lastUserActionTime = Date.now();
 const SLEEP_TIMEOUT = 120000; // 2 min idle → sleep
 
-export const PetProvider: React.FC<PetProviderProps> = ({ children }) => {
+export const PetProvider: FC<PetProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(petStateReducer, "idle");
   const [morphId, setMorphId] = useState("rocky");
 
@@ -92,22 +71,4 @@ export const PetProvider: React.FC<PetProviderProps> = ({ children }) => {
       {children}
     </PetContext.Provider>
   );
-};
-
-export const usePet = () => {
-  const context = useContext(PetContext);
-  if (!context) {
-    throw new Error("usePet must be used within PetProvider");
-  }
-  return context;
-};
-
-// Export actions for easy usage
-export const petActions = {
-  setIdle: () => ({ type: "IDLE" as const }),
-  setHappy: () => ({ type: "HAPPY" as const }),
-  setThink: () => ({ type: "THINK" as const }),
-  setCurious: () => ({ type: "CURIOUS" as const }),
-  setExcite: () => ({ type: "EXCITE" as const }),
-  setSleep: () => ({ type: "SLEEP" as const }),
 };

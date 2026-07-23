@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import AsteroidPet3D from './AsteroidPet3D';
-import { usePet, petActions } from './PetContext';
+import { usePet, petActions } from './usePet';
 import { ASTEROID_MORPHS } from './asteroidData';
 import { SettingOutlined, CloseOutlined } from '@ant-design/icons';
 
@@ -9,6 +9,14 @@ interface Position {
   x: number;
   y: number;
 }
+
+const initialPosition = (): Position => {
+  if (typeof window === 'undefined') return { x: 0, y: 0 };
+  return {
+    x: window.innerWidth - 120,
+    y: window.innerHeight - 120,
+  };
+};
 
 function PetPanel({
   morphId,
@@ -63,19 +71,12 @@ function PetPanel({
 
 export default function PetOverlay() {
   const { state, triggerAction, morphId, setMorphId } = usePet();
-  const [position, setPosition] = useState<Position>({ x: 0, y: 0 });
+  const [position, setPosition] = useState<Position>(initialPosition);
   const [isDragging, setIsDragging] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
   const dragStart = useRef<Position>({ x: 0, y: 0 });
   const posStart = useRef<Position>({ x: 0, y: 0 });
   const dragMoved = useRef(false);
-
-  // 初始位置：右下角
-  useEffect(() => {
-    const x = window.innerWidth - 120;
-    const y = window.innerHeight - 120;
-    setPosition({ x, y });
-  }, []);
 
   // 窗口大小变化时调整
   useEffect(() => {
@@ -179,7 +180,7 @@ export default function PetOverlay() {
 
   // 安装 window.petActions
   useEffect(() => {
-    (window as any).petActions = {
+    window.petActions = {
       setHappy: () => triggerAction(petActions.setHappy()),
       setThink: () => triggerAction(petActions.setThink()),
       setCurious: () => triggerAction(petActions.setCurious()),

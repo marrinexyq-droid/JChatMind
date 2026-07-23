@@ -17,7 +17,7 @@ export default function GlassModal({
   children,
 }: GlassModalProps) {
   useEffect(() => {
-    if (open) (window as any).petActions?.setCurious?.();
+    if (open) window.petActions?.setCurious?.();
   }, [open]);
 
   return (

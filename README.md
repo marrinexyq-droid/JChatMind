@@ -66,13 +66,14 @@ Markdown / PDF
 | 2026-07-13 | 收敛 Task 1–6 | 清理重复产物并保护工作区缓存；移除已提交 Secret 默认值并增加全仓扫描；锁定 Python 3.11/uv 环境；让 Embedding 配置真正驱动运行时；补齐索引原子性与兼容性门禁；支持文本型 PDF 摄取；生成带有效证据引用的回答。 |
 | 2026-07-17 | 收敛 Task 7 | 增加当前 Pipeline Golden-set runner 与独立 JSON 报告，通过 source path/heading 将运行时 chunk 映射到稳定 Golden context；Judge-RAGAS 的 generated policy 只接受该报告；Canary 2.7 以实时 Recall@1/MRR、全量 Judge 和 Runtime Smoke 作发布结论，并严格拒绝无效 Golden schema、空 case、case error、空答案、reference/evidence fallback 和 SQLite VectorStore。 |
 | 2026-07-23 | 收敛 Task 8 | 将同一份 Python 查询 Trace 通过 `SearchResponse` 和 MCP structured content 透传 `trace_id`/`trace_stages`，以安全快照呈现 dense、sparse、fusion、rerank 与 response 阶段；Java Bridge 改为映射真实阶段和 fallback 状态，不再把最终引用伪装成完整 RRF Trace；旧版 MCP 响应继续兼容并显式标记 `partial=true`，React 沿用现有 `ragTrace` 消费协议。 |
+| 2026-07-23 | 收敛 Task 8A | 清零前端 32 个 ESLint error 和 1 个 warning：为全局宠物动作补齐类型，收窄未使用的 SideMenu props，以稳定 seeded factory 生成 3D 几何，隔离条件 Hook，并将 Context/Hook 与 Provider 拆到独立 Fast Refresh seam；`npm run lint` 达到 0 error/0 warning，生产构建通过。 |
 
-当前 [RAG 收敛计划](docs/superpowers/plans/2026-07-13-rag-convergence.md) 已完成 Task 1–8
+当前 [RAG 收敛计划](docs/superpowers/plans/2026-07-13-rag-convergence.md) 已完成 Task 1–8A
 的代码实现，Python 全量测试最新记录为 **168 passed**，Java 非在线示例测试为 **72 passed**，
-前端生产构建已通过；现有 ESLint 基线仍有 32 个错误，留待 Task 8A 专项修复。本机严格 current-pipeline 运行已
+前端 ESLint 为 **0 error / 0 warning** 且生产构建通过。本机严格 current-pipeline 运行已
 正确保持 Chroma 且 fail-closed，但因 Ollama `localhost:11434` 未运行而返回 `failed`；
-因此 P3 运行时 Gate 尚未宣告通过。下一阶段是前端基线质量门禁和 Canary burn-in；
-在这些门禁通过前，默认 Profile 仍保留 Java RAG fallback，
+因此 P3 运行时 Gate 尚未宣告通过。下一阶段是 Task 9 Canary burn-in、默认开启 Python
+Bridge 并退役 Java RAG；在这些门禁通过前，默认 Profile 仍保留 Java RAG fallback，
 Cutover Readiness 维持 `not_ready`。历史暴露凭证仍必须由仓库所有者在外部平台完成
 轮换，代码扫描不能代替凭证撤销。
 

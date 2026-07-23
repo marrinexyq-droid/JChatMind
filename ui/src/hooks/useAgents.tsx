@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   type AgentVO,
   createAgent,
@@ -8,19 +8,7 @@ import {
   updateAgent,
   type UpdateAgentRequest,
 } from "../api/api.ts";
-
-interface AgentsContextType {
-  agents: AgentVO[];
-  createAgentHandle: (agent: CreateAgentRequest) => Promise<void>;
-  deleteAgentHandle: (agentId: string) => Promise<void>;
-  updateAgentHandle: (
-    agentId: string,
-    request: UpdateAgentRequest,
-  ) => Promise<void>;
-  refreshAgents: () => Promise<void>;
-}
-
-const AgentsContext = createContext<AgentsContextType | undefined>(undefined);
+import { AgentsContext } from "./useAgents.ts";
 
 export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [agents, setAgents] = useState<AgentVO[]>([]);
@@ -75,12 +63,4 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       {children}
     </AgentsContext.Provider>
   );
-}
-
-export function useAgents(): AgentsContextType {
-  const context = useContext(AgentsContext);
-  if (context === undefined) {
-    throw new Error("useAgents must be used within an AgentProvider");
-  }
-  return context;
 }

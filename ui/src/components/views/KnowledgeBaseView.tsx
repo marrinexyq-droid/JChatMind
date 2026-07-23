@@ -7,7 +7,7 @@ import {
   BookOutlined, UploadOutlined, DeleteOutlined, FileOutlined, PlusOutlined,
 } from "@ant-design/icons";
 import type { UploadProps } from "antd";
-import { useKnowledgeBases } from "../../hooks/useKnowledgeBases.tsx";
+import { useKnowledgeBases } from "../../hooks/useKnowledgeBases.ts";
 import { useDocuments } from "../../hooks/useDocuments.ts";
 import { uploadDocument, type DocumentVO } from "../../api/api.ts";
 import { getKnowledgeBaseEmoji } from "../../utils";

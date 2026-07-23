@@ -4,15 +4,11 @@ import ChatTabContent from "./tabs/ChatTabContent.tsx";
 
 interface SideMenuProps {
   onCreateAgentClick: () => void;
-  onEditAgent: (agent: import("../api/api.ts").AgentVO) => void;
-  onDeleteAgent: (agentId: string) => void;
   onCreateKnowledgeBaseClick: () => void;
 }
 
 export default function SideMenu({
   onCreateAgentClick,
-  onEditAgent: _onEditAgent,
-  onDeleteAgent: _onDeleteAgent,
   onCreateKnowledgeBaseClick,
 }: SideMenuProps) {
   const navigate = useNavigate();
@@ -24,7 +20,7 @@ export default function SideMenu({
       <div className="px-4 pt-3 pb-2">
         <button
           onClick={() => {
-            (window as any).petActions?.setCurious?.();
+            window.petActions?.setCurious?.();
             navigate("/chat");
           }}
           className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-sm font-medium"
@@ -57,7 +53,7 @@ export default function SideMenu({
         <div className="flex items-center gap-1">
           <button
             onClick={() => {
-              (window as any).petActions?.setCurious?.();
+              window.petActions?.setCurious?.();
               navigate("/agent");
             }}
             className="flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm"
@@ -93,7 +89,7 @@ export default function SideMenu({
         <div className="flex items-center gap-1">
           <button
             onClick={() => {
-              (window as any).petActions?.setCurious?.();
+              window.petActions?.setCurious?.();
               navigate("/knowledge-base");
             }}
             className="flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm"
@@ -128,7 +124,7 @@ export default function SideMenu({
         {/* Planetarium nav */}
         <button
           onClick={() => {
-            (window as any).petActions?.setCurious?.();
+            window.petActions?.setCurious?.();
             navigate("/planetarium");
           }}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm mt-1"
