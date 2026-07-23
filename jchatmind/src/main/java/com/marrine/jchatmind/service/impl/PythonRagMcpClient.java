@@ -42,6 +42,13 @@ public class PythonRagMcpClient {
             "get_system_status",
             "get_document_summary"
     );
+    private static final Set<String> RESULT_TRACE_STAGES = Set.of(
+            "dense_retrieval",
+            "sparse_retrieval",
+            "fusion",
+            "rerank",
+            "response_build"
+    );
 
     private final PythonRagBridgeProperties properties;
     private final ObjectMapper objectMapper;
@@ -348,16 +355,23 @@ public class PythonRagMcpClient {
     }
 
     private RagTrace buildTrace(JsonNode structured, String kbId, QueryPlan plan, List<ScoredChunk> chunks) {
-        String traceId = structured.path("trace_id").asText("");
+        JsonNode traceIdNode = structured.path("trace_id");
+        String traceId = traceIdNode.isTextual() ? traceIdNode.asText("").trim() : "";
         JsonNode traceStages = structured.path("trace_stages");
-        if (traceId.isBlank() || !traceStages.isArray() || traceStages.isEmpty()) {
-            return buildLegacyTrace(kbId, plan, chunks);
+        if (traceId.isBlank() || !hasCompleteTraceEnvelope(traceStages)) {
+            return buildPartialTrace(traceId.isBlank() ? null : traceId, kbId, plan, chunks);
         }
 
         List<RagTraceChunk> finalChunks = buildFinalChunks(kbId, chunks, false);
         Map<String, RagTraceChunk> finalChunksById = new LinkedHashMap<>();
         finalChunks.forEach(chunk -> finalChunksById.put(chunk.getId(), chunk));
         JsonNode rerankStage = findTraceStage(traceStages, "rerank");
+        List<RagTraceChunk> rerankResults = stageChunks(
+                traceStages,
+                "rerank",
+                kbId,
+                finalChunksById
+        );
 
         return baseTrace(kbId, plan)
                 .traceId(traceId)
@@ -369,15 +383,20 @@ public class PythonRagMcpClient {
                 .bm25Results(stageChunks(traceStages, "sparse_retrieval", kbId, finalChunksById))
                 .rrfResults(stageChunks(traceStages, "fusion", kbId, finalChunksById))
                 .graphExpandedChunks(List.of())
-                .rerankResults(stageChunks(traceStages, "rerank", kbId, finalChunksById))
+                .rerankResults(rerankResults)
                 .finalChunks(finalChunks)
                 .build();
     }
 
-    private RagTrace buildLegacyTrace(String kbId, QueryPlan plan, List<ScoredChunk> chunks) {
+    private RagTrace buildPartialTrace(
+            String traceId,
+            String kbId,
+            QueryPlan plan,
+            List<ScoredChunk> chunks
+    ) {
         List<RagTraceChunk> finalChunks = buildFinalChunks(kbId, chunks, true);
         return baseTrace(kbId, plan)
-                .traceId(null)
+                .traceId(traceId)
                 .partial(true)
                 .rerankApplied("hybrid-rerank".equals(plan.effectiveMode()))
                 .rerankFallback(false)
@@ -388,6 +407,38 @@ public class PythonRagMcpClient {
                 .rerankResults(List.of())
                 .finalChunks(finalChunks)
                 .build();
+    }
+
+    private boolean hasCompleteTraceEnvelope(JsonNode traceStages) {
+        if (!traceStages.isArray() || traceStages.isEmpty()) {
+            return false;
+        }
+
+        boolean hasQueryProcessing = false;
+        boolean hasResponseBuild = false;
+        for (JsonNode stage : traceStages) {
+            if (!stage.isObject()) {
+                return false;
+            }
+            JsonNode nameNode = stage.path("name");
+            JsonNode methodNode = stage.path("method");
+            JsonNode details = stage.path("details");
+            if (!nameNode.isTextual()
+                    || nameNode.asText("").isBlank()
+                    || !methodNode.isTextual()
+                    || methodNode.asText("").isBlank()
+                    || !details.isObject()) {
+                return false;
+            }
+
+            String stageName = nameNode.asText();
+            if (RESULT_TRACE_STAGES.contains(stageName) && !details.path("results").isArray()) {
+                return false;
+            }
+            hasQueryProcessing |= "query_processing".equals(stageName);
+            hasResponseBuild |= "response_build".equals(stageName);
+        }
+        return hasQueryProcessing && hasResponseBuild;
     }
 
     private RagTrace.RagTraceBuilder baseTrace(String kbId, QueryPlan plan) {
@@ -452,6 +503,11 @@ public class PythonRagMcpClient {
         if (stage == null) {
             return List.of();
         }
+        if ("rerank".equals(stageName)
+                && (stage.path("details").path("fallback").asBoolean(false)
+                || "not_configured".equals(stage.path("method").asText("")))) {
+            return List.of();
+        }
         JsonNode results = stage.path("details").path("results");
         if (!results.isArray()) {
             return List.of();
@@ -462,6 +518,10 @@ public class PythonRagMcpClient {
             JsonNode result = results.get(index);
             String chunkId = result.path("chunk_id").asText("");
             if (chunkId.isBlank()) {
+                continue;
+            }
+            if ("rerank".equals(stageName)
+                    && !"rerank".equals(result.path("source").asText(""))) {
                 continue;
             }
             RagTraceChunk finalChunk = finalChunksById.get(chunkId);
