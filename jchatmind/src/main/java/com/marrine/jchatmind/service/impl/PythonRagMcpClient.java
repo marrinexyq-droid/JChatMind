@@ -432,13 +432,45 @@ public class PythonRagMcpClient {
             }
 
             String stageName = nameNode.asText();
-            if (RESULT_TRACE_STAGES.contains(stageName) && !details.path("results").isArray()) {
+            if (RESULT_TRACE_STAGES.contains(stageName)) {
+                JsonNode results = details.path("results");
+                if (!results.isArray() || !hasValidTraceResults(results)) {
+                    return false;
+                }
+            }
+            if ("rerank".equals(stageName) && !details.path("fallback").isBoolean()) {
                 return false;
             }
             hasQueryProcessing |= "query_processing".equals(stageName);
             hasResponseBuild |= "response_build".equals(stageName);
         }
         return hasQueryProcessing && hasResponseBuild;
+    }
+
+    private boolean hasValidTraceResults(JsonNode results) {
+        for (JsonNode result : results) {
+            if (!result.isObject()) {
+                return false;
+            }
+            JsonNode chunkId = result.path("chunk_id");
+            JsonNode documentId = result.path("document_id");
+            JsonNode score = result.path("score");
+            JsonNode source = result.path("source");
+            JsonNode citationId = result.get("citation_id");
+            if (!chunkId.isTextual()
+                    || chunkId.asText("").isBlank()
+                    || !documentId.isTextual()
+                    || documentId.asText("").isBlank()
+                    || !score.isNumber()
+                    || !Double.isFinite(score.asDouble())
+                    || !source.isTextual()
+                    || source.asText("").isBlank()
+                    || citationId == null
+                    || (!citationId.isNull() && !citationId.isTextual())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private RagTrace.RagTraceBuilder baseTrace(String kbId, QueryPlan plan) {

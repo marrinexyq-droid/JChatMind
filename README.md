@@ -68,7 +68,7 @@ Markdown / PDF
 | 2026-07-23 | 收敛 Task 8 | 将同一份 Python 查询 Trace 通过 `SearchResponse` 和 MCP structured content 透传 `trace_id`/`trace_stages`，以安全快照呈现 dense、sparse、fusion、rerank 与 response 阶段；Java Bridge 改为映射真实阶段和 fallback 状态，不再把最终引用伪装成完整 RRF Trace；旧版 MCP 响应继续兼容并显式标记 `partial=true`，React 沿用现有 `ragTrace` 消费协议。 |
 
 当前 [RAG 收敛计划](docs/superpowers/plans/2026-07-13-rag-convergence.md) 已完成 Task 1–8
-的代码实现，Python 全量测试最新记录为 **168 passed**，Java 非在线示例测试为 **71 passed**，
+的代码实现，Python 全量测试最新记录为 **168 passed**，Java 非在线示例测试为 **72 passed**，
 前端生产构建已通过；现有 ESLint 基线仍有 32 个错误，留待 Task 8A 专项修复。本机严格 current-pipeline 运行已
 正确保持 Chroma 且 fail-closed，但因 Ollama `localhost:11434` 未运行而返回 `failed`；
 因此 P3 运行时 Gate 尚未宣告通过。下一阶段是前端基线质量门禁和 Canary burn-in；

@@ -161,6 +161,22 @@ class PythonRagMcpClientTest {
     }
 
     @Test
+    void parseResponseMarksMalformedStageResultsPartialWithoutInventingScores() throws Exception {
+        PythonRagMcpClient client = new PythonRagMcpClient(new PythonRagBridgeProperties(), new ObjectMapper());
+        QueryPlan plan = QueryPlan.builder().searchQuery("query").mode("hybrid-rerank").topK(1).build();
+        String stdout = """
+                {"jsonrpc":"2.0","id":"java-rag-bridge","result":{"structuredContent":{"trace_id":"python-trace-bad-score","trace_stages":[{"name":"query_processing","method":"SearchRequest","details":{"mode":"hybrid-rerank","top_k":1}},{"name":"rerank","method":"HttpReranker","details":{"fallback":false,"results":[{"chunk_id":"c1","document_id":"d1","score":null,"source":"rerank","citation_id":"C1"}]}},{"name":"response_build","method":"SearchResponse","details":{"results":[{"chunk_id":"c1","document_id":"d1","score":0.9,"source":"rerank","citation_id":"C1"}]}}],"citations":[{"citation_id":"C1","chunk_id":"c1","document_id":"d1","text":"Evidence","score":0.9,"source":"rerank","metadata":{}}]}}}
+                """;
+
+        Optional<RagSearchResult> parsed = client.parseResponse(stdout, "kb", plan);
+
+        assertTrue(parsed.isPresent());
+        assertTrue(parsed.get().getTrace().getPartial());
+        assertEquals("python-trace-bad-score", parsed.get().getTrace().getTraceId());
+        assertTrue(parsed.get().getTrace().getRerankResults().isEmpty());
+    }
+
+    @Test
     void parseResponseReturnsEmptyForMcpError() throws Exception {
         PythonRagMcpClient client = new PythonRagMcpClient(new PythonRagBridgeProperties(), new ObjectMapper());
         QueryPlan plan = QueryPlan.builder().searchQuery("query").mode("hybrid").topK(1).build();
