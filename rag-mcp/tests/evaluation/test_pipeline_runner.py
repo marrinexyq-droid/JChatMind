@@ -1,4 +1,5 @@
 import json
+import hashlib
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +8,8 @@ from scripts.evaluate_current_pipeline import run_current_pipeline
 from src.core.query_engine import SearchResponse
 from src.core.types import RetrievalResult
 from src.evaluation.pipeline_runner import (
+    COHORT_FINGERPRINT_VERSION,
+    RETRIEVAL_EVALUATOR_CONTRACT,
     PipelineEvaluationRunner,
     as_report_dict,
     load_pipeline_cases,
@@ -65,6 +68,8 @@ class RuntimeChunkIdQueryEngine(FakeQueryEngine):
                     metadata={
                         "source_path": "D:/knowledge/RAG-selfTest.md",
                         "title": "Relevant section",
+                        "debug_payload": object(),
+                        "unstable_score": float("nan"),
                     },
                 )
             ],
@@ -164,22 +169,82 @@ def test_pipeline_report_is_separate_from_reference_dataset_answers():
     payload = as_report_dict(report)
 
     assert payload["status"] == "passed"
+    assert payload["version"] == "1.1"
+    assert payload["runtime_scope"] == "python_query_engine"
     assert payload["vector_store_backend"] == "ChromaVectorStore"
     assert payload["summary"] == {
         "case_count": 1,
         "error_count": 0,
         "empty_answer_count": 0,
     }
+    assert payload["dataset"]["case_count"] == 1
+    assert payload["dataset"]["case_ids_sha256"] == hashlib.sha256(
+        b'["answer-001"]'
+    ).hexdigest()
+    assert payload["dataset"]["cohort_fingerprint_version"] == (
+        COHORT_FINGERPRINT_VERSION
+    )
+    assert len(payload["dataset"]["cohort_sha256"]) == 64
+    assert payload["evaluator"] == RETRIEVAL_EVALUATOR_CONTRACT
     assert payload["retrieval_metrics"] == {"recall_at_1": 1.0, "mrr": 1.0}
     assert payload["runtime_metrics"]["fallback_rate"] == 0.0
     assert payload["runtime_metrics"]["error_rate"] == 0.0
     assert payload["cases"][0]["answer"] == "Current pipeline answer [C1]."
     assert payload["cases"][0]["answer_source"] == "generated_answer"
     assert payload["cases"][0]["retrieved_context_ids"] == ["chunk-live-1"]
+    assert payload["cases"][0]["ground_truth_context_ids"] == ["chunk-live-1"]
+    assert len(payload["cases"][0]["golden_case_sha256"]) == 64
     assert payload["cases"][0]["retrieved_contexts"] == [
         "Current pipeline evidence."
     ]
+    assert payload["cases"][0]["retrieved_results"] == [
+        {
+            "chunk_id": "chunk-live-1",
+            "text": "Current pipeline evidence.",
+            "metadata": {},
+        }
+    ]
     assert "reference_answer" not in payload["cases"][0]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"case_id": "answer-002"},
+        {"question": "What changed in the live pipeline?"},
+        {"ground_truth_context_ids": ["chunk-live-2"]},
+        {"source_refs": [{"source": "changed"}]},
+        {"reference_contexts": ["Changed pipeline evidence."]},
+        {
+            "ground_truth": (
+                "A different sufficiently detailed expected answer for validation."
+            )
+        },
+        {
+            "reference_answer": (
+                "A different reference answer used by the configured Judge."
+            )
+        },
+    ],
+)
+def test_semantic_cohort_fingerprint_covers_golden_evaluation_fields(overrides):
+    runner = PipelineEvaluationRunner(FakeQueryEngine())
+    original = as_report_dict(
+        runner.run([golden_case()], collection="live-evaluation")
+    )
+    changed = as_report_dict(
+        runner.run(
+            [golden_case(**overrides)],
+            collection="live-evaluation",
+        )
+    )
+
+    assert changed["dataset"]["cohort_sha256"] != (
+        original["dataset"]["cohort_sha256"]
+    )
+    assert changed["cases"][0]["golden_case_sha256"] != (
+        original["cases"][0]["golden_case_sha256"]
+    )
 
 
 def test_pipeline_case_loader_selects_answer_generation_rows(tmp_path):
@@ -231,6 +296,37 @@ def test_current_pipeline_script_wiring_runs_loaded_cases(tmp_path, monkeypatch)
     ]
     assert report["status"] == "passed"
     assert report["cases"][0]["answer_source"] == "generated_answer"
+
+
+def test_current_pipeline_preflight_rejects_unindexed_collection(tmp_path, monkeypatch):
+    dataset_dir = tmp_path / "evaluation"
+    dataset_dir.mkdir()
+    (dataset_dir / "ragas_cases.combined.jsonl").write_text(
+        json.dumps(golden_case("answer-01", "Run this through the live engine.")) + "\n",
+        encoding="utf-8",
+    )
+    engine = FakeQueryEngine()
+    vector_store = SimpleNamespace(collection_chunk_counts=lambda: {})
+    monkeypatch.setattr(
+        "scripts.evaluate_current_pipeline.build_local_hub",
+        lambda _project_root: SimpleNamespace(
+            query_engine=engine,
+            vector_store=vector_store,
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="collection live-evaluation has no indexed chunks",
+    ):
+        run_current_pipeline(
+            project_root=tmp_path,
+            dataset_dir=dataset_dir,
+            collection="live-evaluation",
+            require_indexed_collection=True,
+        )
+
+    assert engine.requests == []
 
 
 def test_runner_fails_fast_for_invalid_golden_case_schema():
@@ -308,5 +404,15 @@ def test_live_metrics_map_runtime_chunk_ids_to_stable_golden_contexts():
     ]
     assert payload["cases"][0]["matched_ground_truth_context_ids"] == [
         "md:stable-section-id"
+    ]
+    assert payload["cases"][0]["retrieved_results"] == [
+        {
+            "chunk_id": "doc-0000-runtimehash",
+            "text": "Current pipeline evidence.",
+            "metadata": {
+                "source_path": "D:/knowledge/RAG-selfTest.md",
+                "title": "Relevant section",
+            },
+        }
     ]
     assert payload["retrieval_metrics"] == {"recall_at_1": 1.0, "mrr": 1.0}

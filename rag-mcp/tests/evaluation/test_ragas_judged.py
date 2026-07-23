@@ -4,15 +4,19 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from scripts.evaluate_ragas_judged import write_report
 from src.evaluation.ragas_judged import (
     DeterministicJudgeClient,
     JudgeConfig,
+    JudgeScore,
     JudgedRagasCase,
     build_configured_judge,
+    clamp_score,
     evaluate_judged_ragas,
     load_answer_generation_cases,
     load_judge_config,
@@ -104,6 +108,30 @@ def test_generated_policy_reads_answer_and_contexts_from_pipeline_report(tmp_pat
     assert cases[0].answer == "Live generated answer [C1]."
     assert cases[0].contexts == ["Live retrieved evidence."]
     assert cases[0].answer_source == "generated_answer"
+
+
+@pytest.mark.parametrize("overflow", ["1e400", "-1e400"])
+def test_generated_policy_rejects_overflow_numbers_in_pipeline_report(
+    tmp_path,
+    overflow,
+):
+    dataset_dir = write_dataset(tmp_path)
+    pipeline_report = tmp_path / "current-pipeline.json"
+    pipeline_report.write_text(
+        (
+            '{"cases":[{"case_id":"ans-1","answer":"Live generated answer [C1].",'
+            '"answer_source":"generated_answer","retrieved_contexts":["Evidence."],'
+            f'"latency_ms":{overflow},"error":null}}]}}'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="non-finite JSON number"):
+        load_answer_generation_cases(
+            dataset_dir,
+            answer_policy="generated",
+            pipeline_report=pipeline_report,
+        )
 
 
 def test_generated_policy_rejects_reference_answer_fallback(tmp_path):
@@ -260,6 +288,69 @@ def test_deterministic_judge_passes_grounded_reference_answer():
     assert report["metrics"]["answer_relevancy"]["mean"] == 1.0
 
 
+def test_evaluation_input_sha256_is_stable_and_binds_answer_and_contexts():
+    case = JudgedRagasCase(
+        case_id="ans-1",
+        question="What does RAG add?",
+        answer="RAG adds grounded context.",
+        contexts=["Retrieved evidence one.", "Retrieved evidence two."],
+        reference_answer="RAG adds grounded context.",
+        difficulty="easy",
+        tactic="section_summary",
+        answer_source="generated_answer",
+    )
+    judge = DeterministicJudgeClient()
+
+    baseline = evaluate_judged_ragas([case], judge)["cases"][0][
+        "evaluation_input_sha256"
+    ]
+    repeated = evaluate_judged_ragas([case], judge)["cases"][0][
+        "evaluation_input_sha256"
+    ]
+    changed_answer = evaluate_judged_ragas(
+        [replace(case, answer="RAG adds different grounded context.")],
+        judge,
+    )["cases"][0]["evaluation_input_sha256"]
+    changed_contexts = evaluate_judged_ragas(
+        [replace(case, contexts=["Different retrieved evidence."])],
+        judge,
+    )["cases"][0]["evaluation_input_sha256"]
+
+    assert baseline == "b1f9d2aaa55b754a188ba055924db9a23cbbe46c350c71ab9671c563382629c0"
+    assert repeated == baseline
+    assert changed_answer != baseline
+    assert changed_contexts != baseline
+
+
+def test_evaluate_judged_ragas_rejects_non_finite_scores_from_any_judge():
+    class NonFiniteJudge:
+        provider = "test"
+        model = "non-finite"
+
+        def judge(self, case):
+            return JudgeScore(
+                faithfulness=float("nan"),
+                answer_relevancy=1.0,
+                reason="invalid score",
+            )
+
+    cases = [
+        JudgedRagasCase(
+            case_id="ans-non-finite",
+            question="What does RAG add?",
+            answer="RAG adds retrieved context.",
+            contexts=["RAG retrieves context before generation."],
+            reference_answer="RAG adds retrieved context.",
+            difficulty="easy",
+            tactic="section_summary",
+            answer_source="generated_answer",
+        )
+    ]
+
+    with pytest.raises(ValueError, match="Judge score must be finite"):
+        evaluate_judged_ragas(cases, NonFiniteJudge())
+
+
 def test_load_judge_config_reports_missing_env():
     config, missing = load_judge_config({})
 
@@ -287,6 +378,46 @@ def test_parse_score_payload_accepts_json_embedded_in_text():
 
     assert payload["faithfulness"] == 0.8
     assert payload["answer_relevancy"] == 0.9
+
+
+@pytest.mark.parametrize("non_finite", ["NaN", "Infinity", "-Infinity"])
+def test_parse_score_payload_rejects_non_finite_json_scores(non_finite):
+    with pytest.raises(ValueError, match="non-finite JSON number"):
+        parse_score_payload(
+            f'{{"faithfulness": {non_finite}, "answer_relevancy": 0.9}}'
+        )
+
+
+@pytest.mark.parametrize("overflow", ["1e400", "-1e400"])
+def test_parse_score_payload_rejects_overflow_json_scores(overflow):
+    with pytest.raises(ValueError, match="non-finite JSON number"):
+        parse_score_payload(
+            f'{{"faithfulness": {overflow}, "answer_relevancy": 0.9}}'
+        )
+
+
+@pytest.mark.parametrize(
+    "non_finite",
+    [float("nan"), float("inf"), float("-inf"), "NaN", "Infinity"],
+)
+def test_clamp_score_rejects_non_finite_values(non_finite):
+    with pytest.raises(ValueError, match="Judge score must be finite"):
+        clamp_score(non_finite)
+
+
+@pytest.mark.parametrize("boolean", [True, False])
+def test_clamp_score_rejects_boolean_values(boolean):
+    with pytest.raises(ValueError, match="Judge score must be a number"):
+        clamp_score(boolean)
+
+
+def test_judged_report_writer_rejects_non_finite_json(tmp_path):
+    output_json = tmp_path / "invalid-report.json"
+
+    with pytest.raises(ValueError, match="Out of range float values"):
+        write_report(output_json, {"status": "failed", "score": float("nan")})
+
+    assert not output_json.exists()
 
 
 def test_judged_ragas_cli_writes_mock_report(tmp_path):

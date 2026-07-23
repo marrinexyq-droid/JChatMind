@@ -40,6 +40,7 @@ class PythonRagCanaryPreflightRunnerTest {
                 || command.get(2).endsWith("rag-mcp/scripts/canary_smoke.py"));
         assertEquals("--collection", command.get(3));
         assertEquals("kb-canary", command.get(4));
+        assertEquals("--require-chroma", command.get(5));
     }
 
     @Test

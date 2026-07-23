@@ -153,18 +153,25 @@ protocol responses on stdout so MCP clients can consume them.
 
 ## Convergence status
 
-The convergence implementation has completed the code for Tasks 1–7: workspace
+The convergence implementation has completed the code for Tasks 1–8A and the
+Task 9A cutover-gate hardening: workspace
 cleanup, repository secret gates, a frozen Python 3.11/uv environment, runtime
 embedding selection, fail-closed index integrity, Markdown/PDF ingestion, and
 citation-constrained answer generation, followed by current-pipeline evaluation
-and strict generated-answer gates. The latest complete Python run recorded 167
-passing tests. A real strict evaluation still requires an indexed collection,
-Ollama embedding and LLM endpoints, Chroma, and configured Judge credentials;
-missing runtime dependencies produce a failed report instead of a
-reference-answer, unjudged-answer, or SQLite release pass.
-Cross-runtime trace propagation, frontend baseline repair, burn-in/default
-cutover, dashboard actions, and MCP resources remain pending, so the default
-Java fallback is intentionally still enabled.
+and strict generated-answer gates, cross-runtime trace propagation, and a clean
+frontend baseline. The latest complete Python run recorded 340 passing tests.
+Task 9A adds three fixed independent live burn-in rounds, same-cohort
+Java-baseline gates, indexed Chroma preflight, fail-closed Canary routing,
+single-writer ingestion after Python succeeds, and compensating cleanup when
+fail-closed ingestion aborts. A real strict evaluation still requires a reproducibly indexed
+Golden collection, Ollama embedding and LLM models, Chroma, and configured Judge
+credentials; missing runtime dependencies produce a failed report instead of a
+reference-answer, unjudged-answer, or SQLite release pass. The current local
+strict run stops at the empty `acceptance-canary` index; the matching 182-case
+Java baseline artifact is also absent. Default cutover, Java-to-MCP end-to-end
+SLO evidence, hybrid-rerank live parity, Java retirement, dashboard actions, and
+MCP resources remain pending. The default Python Bridge is intentionally still
+disabled.
 
 Version 1.0 is complete when tests pass and the evaluation script reports whether
 the existing Java RAG baseline report and the optional `ragas` package are
@@ -212,8 +219,9 @@ Python when both bridge flags are off.
 
 Version 1.9 adds a development canary cutover profile. Start the Java app with
 `--spring.profiles.active=rag-canary` to enable Python query and ingestion bridge
-flags with legacy fallback and MCP readiness gating. The default profile remains
-fully disabled.
+flags and MCP readiness gating. Task 9A makes this Canary Profile fail closed on
+readiness, query, and ingestion errors; the default profile remains fully
+disabled until strict cutover evidence passes.
 
 Version 2.0 adds an isolated canary smoke harness:
 
@@ -299,10 +307,13 @@ python scripts/evaluate_current_pipeline.py \
   --output-json output/metrics/current_pipeline.json
 ```
 
-Each case records retrieved chunk IDs and text, their mapped stable Golden
-context IDs, answer provenance, latency, and errors. Runtime chunk IDs are
-resolved by explicit context metadata or source path/heading before the report
-aggregates live Recall@1, MRR, P95 latency, fallback rate, and error rate.
+Current-pipeline report schema v1.1 records each ranked result's chunk ID, text,
+and only the stable metadata needed for matching (`golden_context_id`,
+`context_id`, `source_path`, `title`, and `heading`), together with its mapped
+Golden context ID, answer provenance, latency, and errors. Runtime chunk IDs are
+resolved by direct ID, explicit context metadata, source path/heading, or
+reference-context text before the report aggregates live Recall@1, MRR, P95
+latency, fallback rate, and error rate.
 `SearchResponse.answer_source` distinguishes `generated_answer`,
 `evidence_fallback`, and `no_evidence`. Judge-RAGAS generated mode must read the
 current report and refuses missing cases, errors, blank answers, or fallback
@@ -322,6 +333,7 @@ python scripts/canary_acceptance.py \
   --require-chroma \
   --current-pipeline \
   --answer-policy generated \
+  --java-baseline-report data/evaluation/java_current_pipeline_baseline.json \
   --ragas-rounds 3
 ```
 
@@ -331,6 +343,50 @@ Recall@1/MRR misses threshold, the configured Judge rejects any generated
 answer, Runtime Smoke fails, or the live vector backend is SQLite. Static RAGAS
 observations remain available for harness regression, but their thresholds and
 errors do not decide the current-pipeline release status.
+
+Version 2.8 adds current-pipeline comparison and runtime gates. Strict mode only
+accepts a v1.1 Java baseline whose semantic cohort fingerprint, retrieval mode,
+`top_k`, evaluator contract, and recomputed per-case metrics exactly match the
+Python report and local Golden data. Readiness recomputes match/rank from the
+ordered raw result evidence instead of trusting declared matched IDs. The older
+58-case baseline cannot be compared with the 182-case answer-generation cohort.
+Judge schema 2.5 evidence is recomputed from every score and bound to the exact
+generated answer and retrieved contexts. Recall@1 and MRR may degrade by at most 0.02,
+Python QueryEngine P95 latency must be at most 8000 ms, and fallback/error rates
+must each be at most 0.01. The current-pipeline preflight also rejects an empty
+persistent collection before spending time on answer-generation cases. These
+runtime metrics use scope `python_query_engine`; Java-to-MCP/Agent/SSE
+end-to-end SLO evidence is still required before default cutover.
+
+Verifier/readiness version 3.0 separates ordinary CI wiring checks from actual
+cutover evidence. From the repository root, run the strict operator gate without
+skip flags:
+
+```powershell
+.\rag-mcp\.venv\Scripts\python.exe scripts\verify_rag_canary.py --strict-cutover --acceptance-rounds 3
+.\rag-mcp\.venv\Scripts\python.exe scripts\rag_cutover_readiness.py --allow-not-ready
+```
+
+The strict verifier expects the same-cohort Java comparison artifact at
+`rag-mcp/data/evaluation/java_current_pipeline_baseline.json`. Do not copy the
+older 58-case metrics into that file; generate it from the exact case IDs and
+retrieval mode used by the live Python report. Task 9A validates the artifact's
+producer label (`jchatmind-java-current-pipeline-evaluator`), runtime scope
+(`java_rag_retrieval`), timestamp, ordered raw result evidence, and current
+`source_attestation_sha256`, but it does not mint Java runtime evidence. The fixed
+`scripts/generate_java_rag_baseline.py` producer and an exact verifier execution
+step are Task 9B deliverables and are currently absent, so readiness reports
+`java_baseline_producer_present` as blocked. Until those pieces land, a hand-written
+baseline is not release evidence even when its JSON fields are internally consistent.
+
+Strict mode executes exactly three complete acceptance runs and writes each
+round to a unique report. Readiness accepts only fresh v3.0 evidence whose round
+artifacts exist and match the embedded reports, whose Python and fixed full Java
+test commands passed exactly once, and whose Chroma, generated-answer, real
+Judge, same-cohort baseline, quality and runtime evidence is internally
+consistent. The non-strict command used by hosted CI remains a
+harness/wiring check because hosted runners do not own the production corpus,
+Ollama models, or Judge credentials.
 
 Validate dashboard inputs without Streamlit:
 

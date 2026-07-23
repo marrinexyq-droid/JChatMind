@@ -30,8 +30,16 @@ def run_current_pipeline(
     top_k: int = 5,
     mode: RetrievalMode = "hybrid",
     limit: int | None = None,
+    require_indexed_collection: bool = False,
 ) -> dict[str, Any]:
     hub = build_local_hub(project_root.resolve())
+    if require_indexed_collection:
+        chunk_count = hub.vector_store.collection_chunk_counts().get(collection, 0)
+        if chunk_count < 1:
+            raise RuntimeError(
+                f"current pipeline preflight failed: collection {collection} "
+                "has no indexed chunks"
+            )
     runner = PipelineEvaluationRunner(hub.query_engine, top_k=top_k, mode=mode)
     cases = load_pipeline_cases(dataset_dir.resolve(), limit=limit)
     return as_report_dict(runner.run(cases, collection))
@@ -69,13 +77,20 @@ def main(argv: list[str] | None = None) -> int:
         mode=args.mode,
         limit=args.limit,
     )
+    serialized = json.dumps(
+        report,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+        allow_nan=False,
+    )
     if args.output_json is not None:
         args.output_json.parent.mkdir(parents=True, exist_ok=True)
         args.output_json.write_text(
-            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            serialized + "\n",
             encoding="utf-8",
         )
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    print(serialized)
     return 0 if report["status"] == "passed" else 1
 
 

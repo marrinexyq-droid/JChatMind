@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -87,7 +88,7 @@ class PythonBridgeRagServiceTest {
     }
 
     @Test
-    void readinessGateReturnsEmptyWhenFailClosedAndNotReady() {
+    void readinessGateThrowsWhenFailClosedAndNotReady() {
         RagServiceImpl legacy = mock(RagServiceImpl.class);
         PythonRagMcpClient client = mock(PythonRagMcpClient.class);
         PythonRagBridgeProperties properties = enabledWithReadinessGate();
@@ -97,7 +98,7 @@ class PythonBridgeRagServiceTest {
 
         PythonBridgeRagService service = new PythonBridgeRagService(legacy, client, properties);
 
-        assertEquals(List.of(), service.hybridSearchWithTrace("kb", plan).getChunks());
+        assertThrows(IllegalStateException.class, () -> service.hybridSearchWithTrace("kb", plan));
         verify(client, never()).search(any(), any());
         verify(legacy, never()).hybridSearchWithTrace(eq("kb"), any(QueryPlan.class));
     }
@@ -134,6 +135,39 @@ class PythonBridgeRagServiceTest {
         PythonBridgeRagService service = new PythonBridgeRagService(legacy, client, properties);
 
         assertEquals(legacyResult, service.hybridSearchWithTrace("kb", plan));
+    }
+
+    @Test
+    void enabledBridgeThrowsWhenPythonFailsAndFallbackIsDisabled() {
+        RagServiceImpl legacy = mock(RagServiceImpl.class);
+        PythonRagMcpClient client = mock(PythonRagMcpClient.class);
+        PythonRagBridgeProperties properties = new PythonRagBridgeProperties();
+        properties.setEnabled(true);
+        properties.setFallbackOnError(false);
+        QueryPlan plan = plan();
+        when(client.search("kb", plan)).thenReturn(Optional.empty());
+
+        PythonBridgeRagService service = new PythonBridgeRagService(legacy, client, properties);
+
+        assertThrows(IllegalStateException.class, () -> service.hybridSearchWithTrace("kb", plan));
+        verify(legacy, never()).hybridSearchWithTrace(eq("kb"), any(QueryPlan.class));
+    }
+
+    @Test
+    void emptyPythonResultDoesNotUseLegacyWhenEmptyFallbackIsDisabled() {
+        RagServiceImpl legacy = mock(RagServiceImpl.class);
+        PythonRagMcpClient client = mock(PythonRagMcpClient.class);
+        PythonRagBridgeProperties properties = new PythonRagBridgeProperties();
+        properties.setEnabled(true);
+        properties.setFallbackOnEmpty(false);
+        QueryPlan plan = plan();
+        RagSearchResult empty = RagSearchResult.builder().chunks(List.of()).build();
+        when(client.search("kb", plan)).thenReturn(Optional.of(empty));
+
+        PythonBridgeRagService service = new PythonBridgeRagService(legacy, client, properties);
+
+        assertEquals(empty, service.hybridSearchWithTrace("kb", plan));
+        verify(legacy, never()).hybridSearchWithTrace(eq("kb"), any(QueryPlan.class));
     }
 
     @Test

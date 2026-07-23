@@ -34,8 +34,9 @@ class PythonRagBridgeConfigurationFilesTest {
         assertEquals("true", properties.getProperty("rag.python-bridge.canary-preflight-enabled"));
         assertEquals("true", properties.getProperty("rag.python-bridge.canary-preflight-fail-on-error"));
         assertEquals("java-rag-canary", properties.getProperty("rag.python-bridge.canary-preflight-collection"));
-        assertEquals("true", properties.getProperty("rag.python-bridge.fallback-on-error"));
-        assertEquals("true", properties.getProperty("rag.python-bridge.fallback-on-empty"));
+        assertEquals("false", properties.getProperty("rag.python-bridge.fallback-on-error"));
+        assertEquals("false", properties.getProperty("rag.python-bridge.fallback-on-empty"));
+        assertEquals("true", properties.getProperty("rag.python-bridge.fail-on-ingestion-error"));
     }
 
     private Properties load(String resourceName) {

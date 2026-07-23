@@ -162,15 +162,28 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
             updatedDocument.setUpdatedAt(now);
 
             documentMapper.updateById(updatedDocument);
+            boolean ingestedByPython = false;
             if (pythonRagIngestionClient.isEnabled()) {
-                pythonRagIngestionClient.ingest(kbId, documentStorageService.getFilePath(filePath));
+                try {
+                    ingestedByPython = pythonRagIngestionClient.ingest(
+                            kbId,
+                            documentStorageService.getFilePath(filePath)
+                    );
+                } catch (RuntimeException ingestionFailure) {
+                    cleanupFailedPythonIngestion(documentId, filePath, ingestionFailure);
+                    throw ingestionFailure;
+                }
             }
 
             log.info("文档上传成功: kbId={}, documentId={}, filename={}", kbId, documentId, originalFilename);
 
             // 如果是 Markdown 文件，进行解析并生成 chunks
-            if ("md".equalsIgnoreCase(filetype) || "markdown".equalsIgnoreCase(filetype)) {
+            if (("md".equalsIgnoreCase(filetype) || "markdown".equalsIgnoreCase(filetype))
+                    && !ingestedByPython) {
                 processMarkdownDocument(kbId, documentId, filePath);
+            } else if (ingestedByPython) {
+                log.info("Python RAG ingestion is canonical for this upload; skipping legacy Java chunking: documentId={}",
+                        documentId);
             } else {
                 // TODO: 未来可以增加其他文件类型的处理逻辑
                 log.warn("待新增处理的文件类型: {}", filetype);
@@ -182,6 +195,33 @@ public class DocumentFacadeServiceImpl implements DocumentFacadeService {
         } catch (IOException e) {
             log.error("文件保存失败", e);
             throw new BizException("文件保存失败: " + e.getMessage());
+        }
+    }
+
+    private void cleanupFailedPythonIngestion(
+            String documentId,
+            String filePath,
+            RuntimeException ingestionFailure
+    ) {
+        try {
+            int deleted = documentMapper.deleteById(documentId);
+            if (deleted <= 0) {
+                throw new IllegalStateException(
+                        "Failed to remove document record after Python RAG ingestion failure: " + documentId
+                );
+            }
+        } catch (RuntimeException cleanupFailure) {
+            log.error("Failed to remove document record after Python RAG ingestion failure: documentId={}",
+                    documentId, cleanupFailure);
+            ingestionFailure.addSuppressed(cleanupFailure);
+        }
+
+        try {
+            documentStorageService.deleteFile(filePath);
+        } catch (Exception cleanupFailure) {
+            log.error("Failed to remove stored file after Python RAG ingestion failure: documentId={}, filePath={}",
+                    documentId, filePath, cleanupFailure);
+            ingestionFailure.addSuppressed(cleanupFailure);
         }
     }
 

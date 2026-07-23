@@ -121,7 +121,14 @@ def write_report(output_json: Path | None, report: dict) -> None:
         return
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            report,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n",
         encoding="utf-8",
     )
 

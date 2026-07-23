@@ -60,11 +60,11 @@ public class PythonBridgeRagService implements RagService {
         }
 
         if (properties.isReadinessGateEnabled() && !isPythonBridgeReady()) {
-            log.warn("Python RAG MCP readiness gate is not ready; falling back to Java RAG for kbId={}", kbId);
             if (properties.isFallbackOnError()) {
+                log.warn("Python RAG MCP readiness gate is not ready; falling back to Java RAG for kbId={}", kbId);
                 return legacyRagService.hybridSearchWithTrace(kbId, queryPlan);
             }
-            return RagSearchResult.builder().chunks(List.of()).build();
+            throw new IllegalStateException("Python RAG MCP readiness gate is not ready for kbId=" + kbId);
         }
 
         Optional<RagSearchResult> pythonResult = pythonRagMcpClient.search(kbId, queryPlan);
@@ -75,14 +75,13 @@ public class PythonBridgeRagService implements RagService {
             }
             log.warn("Python RAG MCP returned no chunks; falling back to Java RAG for kbId={}", kbId);
             return legacyRagService.hybridSearchWithTrace(kbId, queryPlan);
-        } else {
-            log.warn("Python RAG MCP returned no result for kbId={}", kbId);
         }
 
         if (properties.isFallbackOnError()) {
+            log.warn("Python RAG MCP returned no result; falling back to Java RAG for kbId={}", kbId);
             return legacyRagService.hybridSearchWithTrace(kbId, queryPlan);
         }
-        return pythonResult.orElseGet(() -> RagSearchResult.builder().chunks(List.of()).build());
+        throw new IllegalStateException("Python RAG MCP returned no result for kbId=" + kbId);
     }
 
     @Override

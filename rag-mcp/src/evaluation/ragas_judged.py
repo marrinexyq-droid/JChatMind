@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import re
 import statistics
@@ -87,7 +89,7 @@ def load_answer_generation_cases(
     pipeline_cases: dict[str, dict[str, Any]] = {}
     payload: Mapping[str, Any] | None = pipeline_report_data
     if pipeline_report is not None:
-        payload = json.loads(pipeline_report.read_text(encoding="utf-8"))
+        payload = _load_strict_json(pipeline_report.read_text(encoding="utf-8"))
     if payload is not None:
         pipeline_cases = {
             str(row["case_id"]): row
@@ -305,8 +307,12 @@ def evaluate_judged_ragas(
                 "difficulty": case.difficulty,
                 "tactic": case.tactic,
                 "answer_source": case.answer_source,
-                "faithfulness": round(score.faithfulness, 4),
-                "answer_relevancy": round(score.answer_relevancy, 4),
+                "evaluation_input_sha256": evaluation_input_sha256(case),
+                "faithfulness": round(clamp_score(score.faithfulness), 4),
+                "answer_relevancy": round(
+                    clamp_score(score.answer_relevancy),
+                    4,
+                ),
                 "reason": score.reason,
             }
         )
@@ -340,6 +346,25 @@ def evaluate_judged_ragas(
     }
 
 
+def evaluation_input_sha256(case: JudgedRagasCase) -> str:
+    payload = {
+        "case_id": case.case_id,
+        "question": case.question,
+        "generated_answer": case.answer,
+        "retrieved_contexts": list(case.contexts),
+        "reference_answer": case.reference_answer,
+        "answer_source": case.answer_source,
+    }
+    canonical_json = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
 def not_configured_report(missing: Sequence[str]) -> dict[str, Any]:
     return {
         "version": VERSION,
@@ -367,17 +392,34 @@ def normalized_units(text: str) -> set[str]:
 
 def parse_score_payload(text: str) -> dict[str, Any]:
     try:
-        payload = json.loads(text)
+        payload = _load_strict_json(text)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", text, flags=re.S)
         if not match:
             raise ValueError("Judge response did not contain a JSON object")
-        payload = json.loads(match.group(0))
+        payload = _load_strict_json(match.group(0))
 
     missing = {"faithfulness", "answer_relevancy"} - set(payload)
     if missing:
         raise ValueError(f"Judge response missing required score keys: {sorted(missing)}")
     return payload
+
+
+def _load_strict_json(text: str) -> Any:
+    return json.loads(
+        text,
+        parse_constant=lambda value: (_ for _ in ()).throw(
+            ValueError(f"non-finite JSON number is forbidden: {value}")
+        ),
+        parse_float=_parse_finite_json_float,
+    )
+
+
+def _parse_finite_json_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"non-finite JSON number is forbidden: {value}")
+    return number
 
 
 def extract_gemini_text(response: Mapping[str, Any]) -> str:
@@ -388,7 +430,11 @@ def extract_gemini_text(response: Mapping[str, Any]) -> str:
 
 
 def clamp_score(value: Any) -> float:
+    if isinstance(value, bool):
+        raise ValueError("Judge score must be a number")
     score = float(value)
+    if not math.isfinite(score):
+        raise ValueError("Judge score must be finite")
     return max(0.0, min(1.0, score))
 
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from dataclasses import dataclass, field
-from math import ceil
+from math import ceil, isfinite
 from pathlib import Path
 import re
 from typing import Any, Literal, Mapping, Sequence
@@ -14,12 +16,28 @@ from src.core.types import RetrievalMode, SearchRequest
 from src.evaluation.ragas_cases import load_jsonl
 
 
-VERSION = "1.0"
+VERSION = "1.1"
+COHORT_FINGERPRINT_VERSION = "pipeline-golden-v1"
+RETRIEVAL_EVALUATOR_CONTRACT = {
+    "name": "jchatmind-stable-context-retrieval",
+    "version": "1.0",
+    "match_basis": "ground_truth_context_ids",
+    "recall_at_1": "matched_ground_truth_ids_at_rank_1/ground_truth_context_ids",
+    "mrr": "reciprocal_rank_of_first_matched_ground_truth_context_id",
+}
+MATCH_METADATA_FIELDS = (
+    "golden_context_id",
+    "context_id",
+    "source_path",
+    "title",
+    "heading",
+)
 
 
 @dataclass(frozen=True)
 class PipelineCaseResult:
     case_id: str
+    golden_case_sha256: str
     retrieved_context_ids: list[str]
     answer: str
     latency_ms: float
@@ -27,6 +45,7 @@ class PipelineCaseResult:
     matched_ground_truth_context_ids: list[str | None]
     error: str | None = None
     retrieved_contexts: list[str] = field(default_factory=list)
+    retrieved_results: list[dict[str, Any]] = field(default_factory=list)
     answer_source: str = "pipeline_error"
 
 
@@ -36,6 +55,7 @@ class PipelineEvaluationReport:
     mode: RetrievalMode
     top_k: int
     vector_store_backend: str
+    dataset: dict[str, Any]
     cases: list[PipelineCaseResult]
 
 
@@ -46,6 +66,7 @@ class PipelineGoldenCase(BaseModel):
     dataset_split: str
     question: str = Field(min_length=5)
     answer: str
+    reference_answer: str | None = None
     contexts: list[str]
     ground_truth: str = Field(min_length=20)
     reference_contexts: list[str]
@@ -67,6 +88,8 @@ class PipelineEvaluationRunner:
         top_k: int = 5,
         mode: RetrievalMode = "hybrid",
     ) -> None:
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
+            raise ValueError("top_k must be a positive integer")
         self.query_engine = query_engine
         self.top_k = top_k
         self.mode = mode
@@ -77,9 +100,11 @@ class PipelineEvaluationRunner:
         collection: str,
     ) -> PipelineEvaluationReport:
         validated_cases = _validate_pipeline_cases(cases)
+        dataset = _dataset_evidence(validated_cases)
         results: list[PipelineCaseResult] = []
         for case in validated_cases:
             case_id = case.case_id.strip()
+            golden_case_sha256 = _golden_case_sha256(case)
             question = case.question.strip()
             started = time.perf_counter()
             try:
@@ -98,8 +123,19 @@ class PipelineEvaluationRunner:
                 results.append(
                     PipelineCaseResult(
                         case_id=case_id,
+                        golden_case_sha256=golden_case_sha256,
                         retrieved_context_ids=[item.chunk_id for item in response.results],
                         retrieved_contexts=[item.text for item in response.results],
+                        retrieved_results=[
+                            {
+                                "chunk_id": item.chunk_id,
+                                "text": item.text,
+                                "metadata": _retrieval_evidence_metadata(
+                                    item.metadata
+                                ),
+                            }
+                            for item in response.results
+                        ],
                         answer=response.answer_text,
                         answer_source=response.answer_source,
                         ground_truth_context_ids=case.ground_truth_context_ids,
@@ -111,6 +147,7 @@ class PipelineEvaluationRunner:
                 results.append(
                     PipelineCaseResult(
                         case_id=case_id,
+                        golden_case_sha256=golden_case_sha256,
                         retrieved_context_ids=[],
                         retrieved_contexts=[],
                         answer="",
@@ -129,6 +166,7 @@ class PipelineEvaluationRunner:
             vector_store_backend=(
                 vector_store.__class__.__name__ if vector_store is not None else "unavailable"
             ),
+            dataset=dataset,
             cases=results,
         )
 
@@ -151,7 +189,7 @@ def as_report_dict(report: PipelineEvaluationReport) -> dict[str, Any]:
         _reciprocal_rank(case.matched_ground_truth_context_ids)
         for case in report.cases
     ]
-    latency_values = sorted(case.latency_ms for case in report.cases)
+    latency_values = sorted(round(case.latency_ms, 3) for case in report.cases)
     return {
         "version": VERSION,
         "status": (
@@ -162,7 +200,10 @@ def as_report_dict(report: PipelineEvaluationReport) -> dict[str, Any]:
         "collection": report.collection,
         "mode": report.mode,
         "top_k": report.top_k,
+        "runtime_scope": "python_query_engine",
         "vector_store_backend": report.vector_store_backend,
+        "dataset": report.dataset,
+        "evaluator": dict(RETRIEVAL_EVALUATOR_CONTRACT),
         "summary": {
             "case_count": case_count,
             "error_count": error_count,
@@ -180,11 +221,14 @@ def as_report_dict(report: PipelineEvaluationReport) -> dict[str, Any]:
         "cases": [
             {
                 "case_id": case.case_id,
+                "golden_case_sha256": case.golden_case_sha256,
+                "ground_truth_context_ids": case.ground_truth_context_ids,
                 "retrieved_context_ids": case.retrieved_context_ids,
                 "matched_ground_truth_context_ids": (
                     case.matched_ground_truth_context_ids
                 ),
                 "retrieved_contexts": case.retrieved_contexts,
+                "retrieved_results": case.retrieved_results,
                 "answer": case.answer,
                 "answer_source": case.answer_source,
                 "latency_ms": round(case.latency_ms, 3),
@@ -230,6 +274,65 @@ def _validate_pipeline_cases(
     return validated
 
 
+def _dataset_evidence(cases: Sequence[PipelineGoldenCase]) -> dict[str, Any]:
+    semantic_cases = [_semantic_case_payload(case) for case in cases]
+    return {
+        "case_count": len(cases),
+        "case_ids_sha256": _canonical_sha256(
+            [case["case_id"] for case in semantic_cases],
+            sort_keys=False,
+        ),
+        "cohort_sha256": _canonical_sha256(semantic_cases),
+        "cohort_fingerprint_version": COHORT_FINGERPRINT_VERSION,
+    }
+
+
+def _golden_case_sha256(case: PipelineGoldenCase) -> str:
+    return _canonical_sha256(_semantic_case_payload(case))
+
+
+def _semantic_case_payload(case: PipelineGoldenCase) -> dict[str, Any]:
+    return {
+        "case_id": case.case_id.strip(),
+        "question": case.question.strip(),
+        "ground_truth_context_ids": _normalize_semantic_value(
+            case.ground_truth_context_ids
+        ),
+        "source_refs": _normalize_semantic_value(case.source_refs),
+        "reference_contexts": _normalize_semantic_value(
+            case.reference_contexts
+        ),
+        "ground_truth": case.ground_truth.strip(),
+        "reference_answer": (
+            case.reference_answer or case.ground_truth
+        ).strip(),
+    }
+
+
+def _normalize_semantic_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, Mapping):
+        return {
+            str(key): _normalize_semantic_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_normalize_semantic_value(item) for item in value]
+    return value
+
+
+def _canonical_sha256(value: Any, *, sort_keys: bool = True) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=sort_keys,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _mean(values: Sequence[float]) -> float:
     return round(sum(values) / len(values), 4) if values else 0.0
 
@@ -252,7 +355,7 @@ def _match_ground_truth_context(
     if result.chunk_id in case.ground_truth_context_ids:
         return result.chunk_id
 
-    metadata = result.metadata if isinstance(result.metadata, Mapping) else {}
+    metadata = _retrieval_evidence_metadata(result.metadata)
     metadata_context_id = str(
         metadata.get("golden_context_id") or metadata.get("context_id") or ""
     )
@@ -295,6 +398,21 @@ def _source_path_matches(actual: str, expected: str) -> bool:
         normalized_actual == normalized_expected
         or normalized_actual.endswith(f"/{normalized_expected}")
     )
+
+
+def _retrieval_evidence_metadata(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    evidence: dict[str, Any] = {}
+    for field_name in MATCH_METADATA_FIELDS:
+        field_value = value.get(field_name)
+        if isinstance(field_value, str):
+            evidence[field_name] = field_value
+        elif isinstance(field_value, (bool, int)):
+            evidence[field_name] = field_value
+        elif isinstance(field_value, float) and isfinite(field_value):
+            evidence[field_name] = field_value
+    return evidence
 
 
 def _context_text_matches(actual: str, expected: str) -> bool:

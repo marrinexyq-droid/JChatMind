@@ -82,6 +82,7 @@ public class PythonRagCanaryPreflightRunner implements ApplicationRunner {
         command.add(script.toString());
         command.add("--collection");
         command.add(properties.getCanaryPreflightCollection());
+        command.add("--require-chroma");
         return command;
     }
 

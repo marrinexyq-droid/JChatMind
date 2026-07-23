@@ -67,15 +67,23 @@ Markdown / PDF
 | 2026-07-17 | 收敛 Task 7 | 增加当前 Pipeline Golden-set runner 与独立 JSON 报告，通过 source path/heading 将运行时 chunk 映射到稳定 Golden context；Judge-RAGAS 的 generated policy 只接受该报告；Canary 2.7 以实时 Recall@1/MRR、全量 Judge 和 Runtime Smoke 作发布结论，并严格拒绝无效 Golden schema、空 case、case error、空答案、reference/evidence fallback 和 SQLite VectorStore。 |
 | 2026-07-23 | 收敛 Task 8 | 将同一份 Python 查询 Trace 通过 `SearchResponse` 和 MCP structured content 透传 `trace_id`/`trace_stages`，以安全快照呈现 dense、sparse、fusion、rerank 与 response 阶段；Java Bridge 改为映射真实阶段和 fallback 状态，不再把最终引用伪装成完整 RRF Trace；旧版 MCP 响应继续兼容并显式标记 `partial=true`，React 沿用现有 `ragTrace` 消费协议。 |
 | 2026-07-23 | 收敛 Task 8A | 清零前端 32 个 ESLint error 和 1 个 warning：为全局宠物动作补齐类型，收窄未使用的 SideMenu props，以稳定 seeded factory 生成 3D 几何，隔离条件 Hook，并将 Context/Hook 与 Provider 拆到独立 Fast Refresh seam；`npm run lint` 达到 0 error/0 warning，生产构建通过。 |
+| 2026-07-23 | 收敛 Task 9A | 将切换验证升级为固定 3 轮相互独立的 current-pipeline burn-in：强制 Chroma、已索引验收集合、generated answer、真实 Judge、同语义 cohort / `top_k` / evaluator contract 的 Java baseline、P95 与 fallback/error rate 门禁；v1.1 报告保存逐 retrieval result 的 ID、文本和受限匹配 metadata，readiness 按 runner 规则独立重算 Python/Java match/rank，绑定 Judge 输入摘要，并以当前 source-tree attestation 拒绝源码不匹配的旧产物；另设 Java baseline producer 显式 blocker，确保 Task 9B 固定 producer 落地前手写 JSON 不构成发布证据；逐轮 artifact 必须唯一、存在且与 v3.0 报告一致，完整 Python/Java suite 不可跳过或缩窄；Canary Profile 改为 fail-closed，Python 摄取成功后不再重复 Java Markdown chunk/embed/Graph 写入，摄取异常会补偿清理文件和文档记录。 |
 
 当前 [RAG 收敛计划](docs/superpowers/plans/2026-07-13-rag-convergence.md) 已完成 Task 1–8A
-的代码实现，Python 全量测试最新记录为 **168 passed**，Java 非在线示例测试为 **72 passed**，
-前端 ESLint 为 **0 error / 0 warning** 且生产构建通过。本机严格 current-pipeline 运行已
-正确保持 Chroma 且 fail-closed，但因 Ollama `localhost:11434` 未运行而返回 `failed`；
-因此 P3 运行时 Gate 尚未宣告通过。下一阶段是 Task 9 Canary burn-in、默认开启 Python
-Bridge 并退役 Java RAG；在这些门禁通过前，默认 Profile 仍保留 Java RAG fallback，
-Cutover Readiness 维持 `not_ready`。历史暴露凭证仍必须由仓库所有者在外部平台完成
-轮换，代码扫描不能代替凭证撤销。
+和 Task 9A 门禁加固的代码实现。最新回归为 Python **340 passed**、Java 非在线测试套件通过、
+前端 ESLint **0 error / 0 warning** 且生产构建通过。真实严格验证已正确 fail-closed：运行时
+Smoke 与 Chroma 检查通过，但持久化 `acceptance-canary` 集合当前为 0 个已索引 chunk，
+因此 current pipeline 在预检阶段失败，3 轮 burn-in 完成数为 0/3；同一 182-case cohort 的
+Java baseline producer 与 artifact 均尚未建立，本机 Ollama 也尚未安装 `bge-m3` / `llama3.2` 模型，Judge
+凭证未配置。当前 P95/fallback/error 只覆盖 Python `QueryEngine`，尚未覆盖 Java → MCP →
+Python 的真实端到端链路。项目因此**还不是全 Python 主链路**：默认
+Profile 继续关闭 Python Bridge，Java RAG 尚未弃用，Cutover Readiness 维持 `not_ready`。
+下一阶段 Task 9B 是恢复可复现 Golden 源语料、生成同 cohort Java baseline、建立验收索引、
+配置真实模型/Judge，并补齐 hybrid-rerank live parity 与 Java → MCP 端到端 SLO 证据；只有
+连续 3 轮全部通过后，Task 9C 才会默认开启 Python
+并弃用 Java RAG，随后 Task 9D 再移除 Java
+fallback、索引初始化和残留删除路径。历史暴露凭证仍必须由仓库所有者在外部平台完成轮换，
+代码扫描不能代替凭证撤销。
 
 ## 更新日志
 
@@ -240,7 +248,7 @@ GOOGLE_GENAI_TIMEOUT_MILLIS=30000
 
 ## RAG Canary Verification
 
-Run the project-level RAG canary gate from the repository root:
+Run the offline project-level wiring gate from the repository root:
 
 ```bash
 python scripts/verify_rag_canary.py --acceptance-rounds 3
@@ -248,16 +256,38 @@ python scripts/verify_rag_canary.py --acceptance-rounds 3
 
 The verifier runs `rag-mcp` Python tests, the multi-round canary acceptance
 gate, and Java bridge tests. GitHub Actions runs the same command in
-`.github/workflows/rag-canary-acceptance.yml`.
+`.github/workflows/rag-canary-acceptance.yml`. This non-strict command verifies
+the harness and is not sufficient evidence for a production cutover.
+
+The operator cutover gate must run three independent live rounds without any
+skip flags:
+
+```powershell
+.\rag-mcp\.venv\Scripts\python.exe scripts\verify_rag_canary.py --strict-cutover --acceptance-rounds 3
+```
+
+Each round requires a persistent indexed Chroma collection, current-pipeline
+generated answers, a configured real Judge, and a v1.1 Java evaluator baseline
+over the exact same case fingerprint, retrieval mode, and current source-tree
+attestation. Python QueryEngine P95 latency must be at or below 8 seconds, and
+fallback/error rates at or below 1%.
+Missing runtime data or services fail the gate instead of producing release
+evidence.
+
+The current runtime metrics deliberately identify their scope as
+`python_query_engine`; they do not yet prove Java-to-MCP transport or Agent/SSE
+end-to-end latency. That bridge-level evidence is a separate Task 9B cutover
+blocker.
 
 Check whether the project is ready to make Python RAG the default canonical path:
 
-```bash
-python scripts/rag_cutover_readiness.py --allow-not-ready
+```powershell
+.\rag-mcp\.venv\Scripts\python.exe scripts\rag_cutover_readiness.py --allow-not-ready
 ```
 
-This readiness report is expected to stay `not_ready` until Java RAG internals
-are deprecated or removed and the default Spring profile delegates to Python.
+Readiness v3.0 independently validates a fresh, complete, three-round strict
+report. It stays `not_ready` until that report passes, Java RAG internals are
+deprecated or removed, and the default Spring profile delegates to Python.
 The Python subsystem now includes a Chroma-backed canonical vector store path
 with a local SQLite fallback, plus strict `--require-chroma` canary gates for
 production runtime verification. It also includes a judge-model RAGAS gate for
